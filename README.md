@@ -2,7 +2,7 @@
 
 This project is a visualizer for multiple point clouds and their poses. It is designed to be usable both as a standalone GUI and a Python library.
 
-
+It is based on the Open3D visualization tutorial scripts.
 
 ## Project setup
 
