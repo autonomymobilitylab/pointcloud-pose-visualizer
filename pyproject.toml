@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[tool.ruff]
+line-length = 120
+extend-exclude = ["*.ipynb"]
+
+[project]
+name = "pointcloud-pose-viz"
+version = "0.0"
+authors = [{name = "Eelis Peltola", email = "eelis.peltola@aalto.fi"}]
+description = "Point cloud and pose visualizer"
+readme = "README.md"
+requires-python = ">=3.10.0"
+dependencies = [
+    "matplotlib",
+    "numpy",
+    "open3d",
+    "scipy",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pre-commit",
+    "ruff",
+]

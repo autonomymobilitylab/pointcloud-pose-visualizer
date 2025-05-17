@@ -123,9 +123,7 @@ class PointCloudTransformUI:
             self.settings.rot_x_default,
             self.settings.rot_y_default,
             self.settings.rot_z_default,
-        ) = Rotation.from_matrix(hom2rot(self.initial_transform)).as_euler(
-            "xyz", degrees=True
-        )
+        ) = Rotation.from_matrix(hom2rot(self.initial_transform)).as_euler("xyz", degrees=True)
         (
             self.settings.trans_x_default,
             self.settings.trans_y_default,
@@ -154,12 +152,8 @@ class PointCloudTransformUI:
             center = self.pointclouds[i].get_center()
             self.pointclouds[i].translate(-center)
 
-            self.pointclouds[i].transform(
-                rot2hom(Rotation.from_euler("xz", [-90, -90], degrees=True))
-            )  # Flip
-            self.scene.scene.add_geometry(
-                f"{self.pointcloud_names[i]}", self.pointclouds[i], self.mat
-            )
+            self.pointclouds[i].transform(rot2hom(Rotation.from_euler("xz", [-90, -90], degrees=True)))  # Flip
+            self.scene.scene.add_geometry(f"{self.pointcloud_names[i]}", self.pointclouds[i], self.mat)
 
         # Show coordinate axes
         # self.scene.scene.show_axes(True)
@@ -178,33 +172,25 @@ class PointCloudTransformUI:
 
         # -------------- Slider panel --------------
         # Create the vertical slider panel.
-        self.panel = gui.Vert(
-            0.05 * em, gui.Margins(margin, margin, margin, 2 * margin)
-        )
+        self.panel = gui.Vert(0.05 * em, gui.Margins(margin, margin, margin, 2 * margin))
         # X Rotation slider
         self.panel.add_child(gui.Label("X Rotation (deg)"))
         self.slider_x = gui.Slider(gui.Slider.INT)
-        self.slider_x.set_limits(
-            -self.settings.rotation_limit, self.settings.rotation_limit
-        )
+        self.slider_x.set_limits(-self.settings.rotation_limit, self.settings.rotation_limit)
         self.slider_x.double_value = self.settings.rot_x_default
         self.slider_x.set_on_value_changed(self._on_slider_changed)
         self.panel.add_child(self.slider_x)
         # Y Rotation slider
         self.panel.add_child(gui.Label("Y Rotation (deg)"))
         self.slider_y = gui.Slider(gui.Slider.INT)
-        self.slider_y.set_limits(
-            -self.settings.rotation_limit, self.settings.rotation_limit
-        )
+        self.slider_y.set_limits(-self.settings.rotation_limit, self.settings.rotation_limit)
         self.slider_y.double_value = self.settings.rot_y_default
         self.slider_y.set_on_value_changed(self._on_slider_changed)
         self.panel.add_child(self.slider_y)
         # Z Rotation slider
         self.panel.add_child(gui.Label("Z Rotation (deg)"))
         self.slider_z = gui.Slider(gui.Slider.INT)
-        self.slider_z.set_limits(
-            -self.settings.rotation_limit, self.settings.rotation_limit
-        )
+        self.slider_z.set_limits(-self.settings.rotation_limit, self.settings.rotation_limit)
         self.slider_z.double_value = self.settings.rot_z_default
         self.slider_z.set_on_value_changed(self._on_slider_changed)
         self.panel.add_child(self.slider_z)
@@ -218,27 +204,21 @@ class PointCloudTransformUI:
         # X Translation slider
         self.panel.add_child(gui.Label("X Translation"))
         self.slider_trans_x = gui.Slider(gui.Slider.DOUBLE)
-        self.slider_trans_x.set_limits(
-            -self.settings.translation_limit, self.settings.translation_limit
-        )
+        self.slider_trans_x.set_limits(-self.settings.translation_limit, self.settings.translation_limit)
         self.slider_trans_x.double_value = self.settings.trans_x_default
         self.slider_trans_x.set_on_value_changed(self._on_slider_changed)
         self.panel.add_child(self.slider_trans_x)
         # Y Translation slider
         self.panel.add_child(gui.Label("Y Translation"))
         self.slider_trans_y = gui.Slider(gui.Slider.DOUBLE)
-        self.slider_trans_y.set_limits(
-            -self.settings.translation_limit, self.settings.translation_limit
-        )
+        self.slider_trans_y.set_limits(-self.settings.translation_limit, self.settings.translation_limit)
         self.slider_trans_y.double_value = self.settings.trans_y_default
         self.slider_trans_y.set_on_value_changed(self._on_slider_changed)
         self.panel.add_child(self.slider_trans_y)
         # Z Translation slider
         self.panel.add_child(gui.Label("Z Translation"))
         self.slider_trans_z = gui.Slider(gui.Slider.DOUBLE)
-        self.slider_trans_z.set_limits(
-            -self.settings.translation_limit, self.settings.translation_limit
-        )
+        self.slider_trans_z.set_limits(-self.settings.translation_limit, self.settings.translation_limit)
         self.slider_trans_z.double_value = self.settings.trans_z_default
         self.slider_trans_z.set_on_value_changed(self._on_slider_changed)
         self.panel.add_child(self.slider_trans_z)
@@ -277,20 +257,14 @@ class PointCloudTransformUI:
                 app_menu.add_item("Quit", PointCloudTransformUI.MENU_QUIT)
             file_menu = gui.Menu()
             # file_menu.add_item("Open...", PointCloudTransformUI.MENU_OPEN)
-            file_menu.add_item(
-                "Export Current Image...", PointCloudTransformUI.MENU_EXPORT
-            )
+            file_menu.add_item("Export Current Image...", PointCloudTransformUI.MENU_EXPORT)
             if not isMacOS:
                 file_menu.add_separator()
                 file_menu.add_item("Quit", PointCloudTransformUI.MENU_QUIT)
             settings_menu = gui.Menu()
-            settings_menu.add_item(
-                "Show settings panel", PointCloudTransformUI.MENU_SHOW_SETTINGS
-            )
+            settings_menu.add_item("Show settings panel", PointCloudTransformUI.MENU_SHOW_SETTINGS)
             settings_menu.set_checked(PointCloudTransformUI.MENU_SHOW_SETTINGS, True)
-            settings_menu.add_item(
-                "Show info bar", PointCloudTransformUI.MENU_SHOW_INFOBAR
-            )
+            settings_menu.add_item("Show info bar", PointCloudTransformUI.MENU_SHOW_INFOBAR)
             settings_menu.set_checked(PointCloudTransformUI.MENU_SHOW_INFOBAR, True)
             help_menu = gui.Menu()
             help_menu.add_item("About", PointCloudTransformUI.MENU_ABOUT)
@@ -317,29 +291,19 @@ class PointCloudTransformUI:
         # menu item is activated.
         # Opening new files is not supported.
         # window.set_on_menu_item_activated(PointCloudTransformUI.MENU_OPEN, self._on_menu_open)
-        window.set_on_menu_item_activated(
-            PointCloudTransformUI.MENU_EXPORT, self._on_menu_export
-        )
-        window.set_on_menu_item_activated(
-            PointCloudTransformUI.MENU_QUIT, self._on_menu_quit
-        )
+        window.set_on_menu_item_activated(PointCloudTransformUI.MENU_EXPORT, self._on_menu_export)
+        window.set_on_menu_item_activated(PointCloudTransformUI.MENU_QUIT, self._on_menu_quit)
         window.set_on_menu_item_activated(
             PointCloudTransformUI.MENU_SHOW_SETTINGS,
             self._on_menu_toggle_settings_panel,
         )
-        window.set_on_menu_item_activated(
-            PointCloudTransformUI.MENU_SHOW_INFOBAR, self._on_menu_toggle_infobar
-        )
-        window.set_on_menu_item_activated(
-            PointCloudTransformUI.MENU_ABOUT, self._on_menu_about
-        )
+        window.set_on_menu_item_activated(PointCloudTransformUI.MENU_SHOW_INFOBAR, self._on_menu_toggle_infobar)
+        window.set_on_menu_item_activated(PointCloudTransformUI.MENU_ABOUT, self._on_menu_about)
         # ---- End Menu ----
 
         # ---- Info bar ----
         self.infobar = gui.Horiz(0, gui.Margins(0.25 * em, 0.25 * em, 0.25 * em, 0))
-        infobartext = "Point clouds:\n{}".format(
-            *[name for name in self.pointcloud_names]
-        )
+        infobartext = "Point clouds:\n{}".format(*[name for name in self.pointcloud_names])
         self.infobar.add_child(gui.Label(infobartext))
         # ---- End Info bar ----
 
@@ -354,9 +318,7 @@ class PointCloudTransformUI:
 
     # ---- Menu Callbacks ----
     def _on_menu_open(self):
-        dlg = gui.FileDialog(
-            gui.FileDialog.OPEN, "Choose file to load", self.window.theme
-        )
+        dlg = gui.FileDialog(gui.FileDialog.OPEN, "Choose file to load", self.window.theme)
         dlg.add_filter(
             ".ply .stl .fbx .obj .off .gltf .glb",
             "Triangle mesh files (.ply, .stl, .fbx, .obj, .off, .gltf, .glb)",
@@ -392,9 +354,7 @@ class PointCloudTransformUI:
         self.load(filename)
 
     def _on_menu_export(self):
-        dlg = gui.FileDialog(
-            gui.FileDialog.SAVE, "Choose file to save", self.window.theme
-        )
+        dlg = gui.FileDialog(gui.FileDialog.SAVE, "Choose file to save", self.window.theme)
         dlg.add_filter(".png", "PNG files (.png)")
         pcl_names = "{}_" * len(self.pointcloud_names)
         pcl_names = pcl_names.format(*[name.stem for name in self.pointcloud_names])
@@ -414,15 +374,11 @@ class PointCloudTransformUI:
 
     def _on_menu_toggle_settings_panel(self):
         self.panel.visible = not self.panel.visible
-        gui.Application.instance.menubar.set_checked(
-            PointCloudTransformUI.MENU_SHOW_SETTINGS, self.panel.visible
-        )
+        gui.Application.instance.menubar.set_checked(PointCloudTransformUI.MENU_SHOW_SETTINGS, self.panel.visible)
 
     def _on_menu_toggle_infobar(self):
         self.infobar.visible = not self.infobar.visible
-        gui.Application.instance.menubar.set_checked(
-            PointCloudTransformUI.MENU_SHOW_INFOBAR, self.infobar.visible
-        )
+        gui.Application.instance.menubar.set_checked(PointCloudTransformUI.MENU_SHOW_INFOBAR, self.infobar.visible)
 
     def _on_menu_about(self):
         # Show a simple dialog. Although the Dialog is actually a widget, you can
@@ -502,9 +458,7 @@ class PointCloudTransformUI:
         self.homogeneous_transform = T
 
         # Update point cloud transformation.
-        self.scene.scene.set_geometry_transform(
-            f"{self.pointcloud_names[-1]}", self.homogeneous_transform
-        )
+        self.scene.scene.set_geometry_transform(f"{self.pointcloud_names[-1]}", self.homogeneous_transform)
         self.scene.force_redraw()
 
     def _on_print_tf(self):
@@ -554,9 +508,7 @@ class PointCloudTransformUI:
         intensity_min = intensities.min()
         intensity_max = intensities.max()
         if intensity_max > intensity_min:
-            intensities_norm = (intensities - intensity_min) / (
-                intensity_max - intensity_min
-            )
+            intensities_norm = (intensities - intensity_min) / (intensity_max - intensity_min)
         else:
             intensities_norm = intensities
         cmap = plt.get_cmap(colormap)
@@ -584,14 +536,10 @@ class PointCloudTransformUI:
         # For values <= 0.04045: linear = color / 12.92
         # For values > 0.04045: linear = ((color + 0.055) / 1.055) ** 2.4
         colors = np.asarray(colors)
-        linear = np.where(
-            colors <= 0.04045, colors / 12.92, ((colors + 0.055) / 1.055) ** 2.4
-        )
+        linear = np.where(colors <= 0.04045, colors / 12.92, ((colors + 0.055) / 1.055) ** 2.4)
         return linear
 
-    def load_pcl_from_ply(
-        self, filename: str | Path, convert_srgb: bool = True
-    ) -> o3d.geometry.PointCloud:
+    def load_pcl_from_ply(self, filename: str | Path, convert_srgb: bool = True) -> o3d.geometry.PointCloud:
         """
         Load point cloud from a PLY file. Standardizes the point cloud by converting colors to linear
         """
@@ -636,9 +584,7 @@ class PointCloudTransformUI:
         width = 17 * layout_context.theme.font_size
         height = min(
             r.height,
-            self.panel.calc_preferred_size(
-                layout_context, gui.Widget.Constraints()
-            ).height,
+            self.panel.calc_preferred_size(layout_context, gui.Widget.Constraints()).height,
         )
         self.panel.frame = gui.Rect(r.get_right() - width, r.y, width, height)
         self.infobar.frame = gui.Rect(
@@ -649,26 +595,18 @@ class PointCloudTransformUI:
         )
         infobar_width = min(
             r.width,
-            self.infobar.calc_preferred_size(
-                layout_context, gui.Widget.Constraints()
-            ).width,
+            self.infobar.calc_preferred_size(layout_context, gui.Widget.Constraints()).width,
         )
         infobar_height = min(
             r.height,
-            self.infobar.calc_preferred_size(
-                layout_context, gui.Widget.Constraints()
-            ).height,
+            self.infobar.calc_preferred_size(layout_context, gui.Widget.Constraints()).height,
         )
-        self.infobar.frame = gui.Rect(
-            r.x, r.get_bottom() - infobar_height, infobar_width, infobar_height
-        )
+        self.infobar.frame = gui.Rect(r.x, r.get_bottom() - infobar_height, infobar_width, infobar_height)
 
 
 def main(pcl_files, initial_transform=None):
     gui.Application.instance.initialize()
-    window = gui.Application.instance.create_window(
-        "Pointcloud alignment tool", 1920, 1080
-    )
+    window = gui.Application.instance.create_window("Pointcloud alignment tool", 1920, 1080)
     if initial_transform is not None:
         PointCloudTransformUI(window, pcl_files, initial_transform)
     else:
@@ -691,9 +629,7 @@ if __name__ == "__main__":
         default=[],
         help="Point cloud files (leave empty to use defaults)",
     )
-    parser.add_argument(
-        "-t", "--initial-transform", type=str, help="Initial transformation matrix"
-    )
+    parser.add_argument("-t", "--initial-transform", type=str, help="Initial transformation matrix")
     args = parser.parse_args()
     pcl_files = []
     if args.pointclouds:
@@ -708,9 +644,7 @@ if __name__ == "__main__":
             "/media/epe/HDD/KITTI-360/depth_vis_metric_pcl_test/data_2d_raw/2013_05_28_drive_0000_sync/image_00/data_rect_small/0000000093.ply",
             "/home/epe/Downloads/0000000093.bin",
         ]
-    initial_transform = (
-        np.loadtxt(args.initial_transform) if args.initial_transform else None
-    )
+    initial_transform = np.loadtxt(args.initial_transform) if args.initial_transform else None
     # initial_transform = np.loadtxt("/media/epe/HDD/KITTI-360/raw/calibration/calib_cam_to_velo.txt")
     # initial_transform = initial_transform.reshape(3, 4)
     # initial_transform = np.concatenate((initial_transform, np.array([0, 0, 0, 1]).reshape(1, 4)))
