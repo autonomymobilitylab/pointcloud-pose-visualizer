@@ -1,5 +1,4 @@
 from datetime import datetime
-import math
 from pathlib import Path
 import platform
 import sys
@@ -12,7 +11,7 @@ import open3d.visualization.gui as gui
 import open3d.visualization.rendering as rendering
 from scipy.spatial.transform import Rotation
 
-from utils import rot2hom, rot_transl2hom, hom2rot, hom2transl
+from utils import hom2rot, hom2transl, rot2hom, rot_transl2hom, rotxyz2rotmat
 
 
 isMacOS = platform.system() == "Darwin"
@@ -367,38 +366,13 @@ class PointCloudTransformUI:
         x_deg = self.sliders["rx"].double_value
         y_deg = self.sliders["ry"].double_value
         z_deg = self.sliders["rz"].double_value
-        x_rad = math.radians(x_deg)
-        y_rad = math.radians(y_deg)
-        z_rad = math.radians(z_deg)
 
         scale = self.sliders["scale"].double_value
         trans_x = self.sliders["tx"].double_value
         trans_y = self.sliders["ty"].double_value
         trans_z = self.sliders["tz"].double_value
 
-        Rx = np.array(
-            [
-                [1, 0, 0],
-                [0, math.cos(x_rad), -math.sin(x_rad)],
-                [0, math.sin(x_rad), math.cos(x_rad)],
-            ]
-        )
-        Ry = np.array(
-            [
-                [math.cos(y_rad), 0, math.sin(y_rad)],
-                [0, 1, 0],
-                [-math.sin(y_rad), 0, math.cos(y_rad)],
-            ]
-        )
-        Rz = np.array(
-            [
-                [math.cos(z_rad), -math.sin(z_rad), 0],
-                [math.sin(z_rad), math.cos(z_rad), 0],
-                [0, 0, 1],
-            ]
-        )
-        # Combine rotations: order X, Y, Z.
-        self.R = Rz @ Ry @ Rx
+        self.R = rotxyz2rotmat(x_deg, y_deg, z_deg, units="deg")
 
         # Create transformation matrix with scaling and translation
         self.homogeneous_transform = rot_transl2hom(scale * self.R, [trans_x, trans_y, trans_z])
@@ -447,6 +421,14 @@ class PointCloudTransformUI:
 
         self.scene.scene.scene.render_to_image(on_image)
 
+    def srgb_to_linear(self, colors):
+        # Using the standard sRGB conversion:
+        # For values <= 0.04045: linear = color / 12.92
+        # For values > 0.04045: linear = ((color + 0.055) / 1.055) ** 2.4
+        colors = np.asarray(colors)
+        linear = np.where(colors <= 0.04045, colors / 12.92, ((colors + 0.055) / 1.055) ** 2.4)
+        return linear
+
     def intensity_to_color(self, intensities: np.ndarray, colormap: str) -> np.ndarray:
         """
         Normalizes intensities and maps them to colors using a colormap.
@@ -488,14 +470,6 @@ class PointCloudTransformUI:
         pcd.colors = o3d.utility.Vector3dVector(colors)
 
         return pcd
-
-    def srgb_to_linear(self, colors):
-        # Using the standard sRGB conversion:
-        # For values <= 0.04045: linear = color / 12.92
-        # For values > 0.04045: linear = ((color + 0.055) / 1.055) ** 2.4
-        colors = np.asarray(colors)
-        linear = np.where(colors <= 0.04045, colors / 12.92, ((colors + 0.055) / 1.055) ** 2.4)
-        return linear
 
     def load_pcl_from_ply(self, filename: str | Path, convert_srgb: bool = True) -> o3d.geometry.PointCloud:
         """
@@ -551,13 +525,19 @@ class PointCloudTransformUI:
         self.scene.scene.add_geometry(f"{pointcloud_name}", pointcloud, self.mat)
 
     def reset_camera_view(self):
-        # Setup camera based on the largest point cloud's bounding box.
-        max_bound = max([max(pcl.get_max_bound()) for pcl in self.pointclouds])
+        # Setup camera based on the combined bounding box of all point clouds.
+        max_bound = np.max(np.array([pcl.get_max_bound() for pcl in self.pointclouds]), axis=0)
+        min_bound = np.min(np.array([pcl.get_min_bound() for pcl in self.pointclouds]), axis=0)
+        combined_bbox = o3d.geometry.AxisAlignedBoundingBox(min_bound, max_bound)
+        # combined_center = combined_bbox.get_center()
+        combined_half_extent = combined_bbox.get_half_extent()
+        combined_radius = np.linalg.norm(combined_half_extent)
+
         self.settings.camera_view = [
-            [0, 0, 0],
-            [-max_bound, max_bound, max_bound],
-            [0, 0, 1],
-        ]  # View direction, eye position, up direction
+            [0, 0, 0],  # View direction (look at)
+            combined_radius * np.array([-1, 1, 1]) * 0.7,  # Eye position
+            [0, 0, 1],  # Up direction
+        ]
         self.scene.scene.camera.look_at(*self.settings.camera_view)
 
     def on_layout(self, layout_context):
