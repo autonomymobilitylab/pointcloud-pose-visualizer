@@ -71,28 +71,15 @@ class PointCloudTransformUI:
         ply_files: list[str | Path],
         initial_transform: np.ndarray = np.eye(4),
     ):
-        self.window = window
-        em = self.window.theme.font_size
-        margin = 0.25 * em
-
         self.settings = Settings()
 
-        slider_labels = {
-            "rx": "X Rotation (deg)",
-            "ry": "Y Rotation (deg)",
-            "rz": "Z Rotation (deg)",
-            "tx": "X Translation",
-            "ty": "Y Translation",
-            "tz": "Z Translation",
-            "scale": "Scaling",
-            "pointsize": "Point size",
-        }
+        self.pointclouds: list[o3d.geometry.PointCloud] = []
+        self.pointcloud_names: list[str | Path] = []
 
         if initial_transform.size != 16:
             raise ValueError("Initial transformation matrix must be a 4x4 matrix.")
         initial_transform = initial_transform.reshape(4, 4)
         self.initial_transform = initial_transform
-
         (
             self.settings.rotation_default,
             self.settings.rotation_default,
@@ -108,6 +95,20 @@ class PointCloudTransformUI:
         self.homogeneous_transform = self.initial_transform
         self.R = np.eye(3)
 
+        # Create a window
+        self.window = window
+        self.setup_ui()
+
+        # Load point clouds
+        self.pointclouds, self.pointcloud_names = self.load_pointclouds(ply_files)
+        for i in range(len(self.pointclouds)):
+            self.add_pcl_to_scene(self.pointclouds[i], str(self.pointcloud_names[i]), flip=self.settings.flip)
+        self.reset_camera_view()
+
+    def setup_ui(self):
+        em = self.window.theme.font_size
+        margin = 0.25 * em
+
         # Create a SceneWidget for 3D rendering.
         self.scene = gui.SceneWidget()
         self.scene.scene = rendering.Open3DScene(self.window.renderer)
@@ -119,12 +120,6 @@ class PointCloudTransformUI:
         self.mat.shader = "defaultUnlit"
         self.mat.point_size = self.settings.point_size_default
 
-        self.pointclouds, self.pointcloud_names = self.load_pointclouds(ply_files)
-        for i in range(len(self.pointclouds)):
-            self.add_pcl_to_scene(self.pointclouds[i], str(self.pointcloud_names[i]), flip=self.settings.flip)
-
-        self.reset_camera_view()
-
         # Show coordinate axes
         # self.scene.scene.show_axes(True)
 
@@ -135,6 +130,16 @@ class PointCloudTransformUI:
         # Create the vertical slider panel.
         self.panel = gui.Vert(0.05 * em, gui.Margins(margin, margin, margin, 2 * margin))
 
+        slider_labels = {
+            "rx": "X Rotation (deg)",
+            "ry": "Y Rotation (deg)",
+            "rz": "Z Rotation (deg)",
+            "tx": "X Translation",
+            "ty": "Y Translation",
+            "tz": "Z Translation",
+            "scale": "Scaling",
+            "pointsize": "Point size",
+        }
         self.sliders = {}
         for slider_key in ["rx", "ry", "rz"]:
             self.panel.add_child(gui.Label(slider_labels[slider_key]))
@@ -228,20 +233,23 @@ class PointCloudTransformUI:
         # The menubar is global, but we need to connect the menu items to the
         # window, so that the window can call the appropriate function when the
         # menu item is activated.
-        window.set_on_menu_item_activated(PointCloudTransformUI.MENU_OPEN, self._on_menu_open)
-        window.set_on_menu_item_activated(PointCloudTransformUI.MENU_EXPORT, self._on_menu_export)
-        window.set_on_menu_item_activated(PointCloudTransformUI.MENU_QUIT, self._on_menu_quit)
-        window.set_on_menu_item_activated(
+        self.window.set_on_menu_item_activated(PointCloudTransformUI.MENU_OPEN, self._on_menu_open)
+        self.window.set_on_menu_item_activated(PointCloudTransformUI.MENU_EXPORT, self._on_menu_export)
+        self.window.set_on_menu_item_activated(PointCloudTransformUI.MENU_QUIT, self._on_menu_quit)
+        self.window.set_on_menu_item_activated(
             PointCloudTransformUI.MENU_SHOW_SETTINGS,
             self._on_menu_toggle_settings_panel,
         )
-        window.set_on_menu_item_activated(PointCloudTransformUI.MENU_SHOW_INFOBAR, self._on_menu_toggle_infobar)
-        window.set_on_menu_item_activated(PointCloudTransformUI.MENU_ABOUT, self._on_menu_about)
+        self.window.set_on_menu_item_activated(PointCloudTransformUI.MENU_SHOW_INFOBAR, self._on_menu_toggle_infobar)
+        self.window.set_on_menu_item_activated(PointCloudTransformUI.MENU_ABOUT, self._on_menu_about)
         # ---- End Menu ----
 
         # ---- Info bar ----
         self.infobar = gui.Horiz(0, gui.Margins(0.25 * em, 0.25 * em, 0.25 * em, 0))
-        infobartext = "Point clouds:\n{}".format(*[name for name in self.pointcloud_names])
+        if len(self.pointcloud_names) > 0:
+            infobartext = "Point clouds:\n{}".format(*[name for name in self.pointcloud_names])
+        else:
+            infobartext = "No point clouds loaded."
         self.infobar.add_child(gui.Label(infobartext))
         # ---- End Info bar ----
 
@@ -312,8 +320,7 @@ class PointCloudTransformUI:
 
     def _on_export_dialog_done(self, filename):
         self.window.close_dialog()
-        frame = self.scene.frame
-        self.export_image(filename, frame.width, frame.height)
+        self.export_image(filename)
 
     def _on_menu_quit(self):
         gui.Application.instance.quit()
@@ -411,7 +418,7 @@ class PointCloudTransformUI:
 
     # ---- End Panel Callbacks ----
 
-    def export_image(self, path, width, height):
+    def export_image(self, path: str):
         def on_image(image):
             img = image
             quality = 9  # png
@@ -421,11 +428,13 @@ class PointCloudTransformUI:
 
         self.scene.scene.scene.render_to_image(on_image)
 
-    def srgb_to_linear(self, colors):
+    def srgb_to_linear(self, colors: np.ndarray) -> np.ndarray:
+        """
+        Convert sRGB colors to linear RGB.
+        """
         # Using the standard sRGB conversion:
         # For values <= 0.04045: linear = color / 12.92
         # For values > 0.04045: linear = ((color + 0.055) / 1.055) ** 2.4
-        colors = np.asarray(colors)
         linear = np.where(colors <= 0.04045, colors / 12.92, ((colors + 0.055) / 1.055) ** 2.4)
         return linear
 
