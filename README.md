@@ -10,18 +10,22 @@ It is based on the Open3D visualization tutorial scripts.
 python3 -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip
-pip install -r requirements.txt
-pip install -r requirements-dev.txt
+pip install -e .
 pre-commit install
 ```
 
-## Linting, formatting, and typechecks
+Conda also works just as well as virtualenv.
 
-This project template uses the following tools for autoformatting, linting and typechecking:
+If you experience segfault errors when opening the GUI, try adding an environment variable: `export XDG_SESSION_TYPE=x11`.
 
+## Linting, formatting, and pre-commit checks
+
+This project template uses the following tools for autoformatting, linting and checks:
+
+* pre-commit-hooks: small checks, e.g. for file names and end-of-file lines
 * ruff: linting and formatting
 
-Pre-commit hooks are used to run these tools automatically when committing to git.
+Pre-commit is used to run these tools automatically when committing to git.
 
 ### Pre-commit hooks
 

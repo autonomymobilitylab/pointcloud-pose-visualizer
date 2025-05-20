@@ -12,47 +12,10 @@ import open3d.visualization.gui as gui
 import open3d.visualization.rendering as rendering
 from scipy.spatial.transform import Rotation
 
+from utils import rot2hom, rot_transl2hom, hom2rot, hom2transl
+
 
 isMacOS = platform.system() == "Darwin"
-
-
-def rot2hom(rot: np.ndarray | Rotation) -> np.ndarray:
-    """
-    Convert a 3x3 rotation matrix to a 4x4 homogeneous transformation matrix.
-    """
-    T = np.eye(4)
-    if isinstance(rot, Rotation):
-        T[:3, :3] = rot.as_matrix()
-    else:
-        T[:3, :3] = rot
-    return T
-
-
-def rot_transl2hom(rot: np.ndarray | Rotation, transl: np.ndarray) -> np.ndarray:
-    """
-    Convert a 3x3 rotation matrix and a 3D translation vector to a 4x4 homogeneous transformation matrix.
-    """
-    T = np.eye(4)
-    if isinstance(rot, Rotation):
-        T[:3, :3] = rot.as_matrix()
-    else:
-        T[:3, :3] = rot
-    T[:3, 3] = transl
-    return T
-
-
-def hom2rot(T: np.ndarray) -> np.ndarray:
-    """
-    Extract the 3x3 rotation matrix from a 4x4 homogeneous transformation matrix.
-    """
-    return T[:3, :3]
-
-
-def hom2transl(T: np.ndarray) -> np.ndarray:
-    """
-    Extract the 3D translation vector from a 4x4 homogeneous transformation matrix.
-    """
-    return T[:3, 3]
 
 
 class Settings:
@@ -60,27 +23,28 @@ class Settings:
     Default settings for the point cloud transformation UI.
     """
 
-    # Rotation defaults (in degrees)
-    rot_x_default = 0
-    rot_y_default = 0
-    rot_z_default = 0
+    # Rotation defaults
+    rotation_default = 0  # (in degrees)
 
     # Scale default
     scale_default = 1.0
 
     # Translation defaults
-    trans_x_default = 0.0
-    trans_y_default = 0.0
-    trans_z_default = 0.0
+    translation_default = 0.0
 
     # Point size default
-    point_size_default = 3
+    point_size_default = 2
 
     # Limits
     rotation_limit = 180
     scaling_limit = 3.0
     translation_limit = 50.0
     point_size_limit = 6
+
+    # Flip point clouds
+    flip = True
+
+    #
 
     # Camera view
     camera_view = [
@@ -114,20 +78,31 @@ class PointCloudTransformUI:
 
         self.settings = Settings()
 
+        slider_labels = {
+            "rx": "X Rotation (deg)",
+            "ry": "Y Rotation (deg)",
+            "rz": "Z Rotation (deg)",
+            "tx": "X Translation",
+            "ty": "Y Translation",
+            "tz": "Z Translation",
+            "scale": "Scaling",
+            "pointsize": "Point size",
+        }
+
         if initial_transform.size != 16:
             raise ValueError("Initial transformation matrix must be a 4x4 matrix.")
         initial_transform = initial_transform.reshape(4, 4)
         self.initial_transform = initial_transform
 
         (
-            self.settings.rot_x_default,
-            self.settings.rot_y_default,
-            self.settings.rot_z_default,
+            self.settings.rotation_default,
+            self.settings.rotation_default,
+            self.settings.rotation_default,
         ) = Rotation.from_matrix(hom2rot(self.initial_transform)).as_euler("xyz", degrees=True)
         (
-            self.settings.trans_x_default,
-            self.settings.trans_y_default,
-            self.settings.trans_z_default,
+            self.settings.translation_default,
+            self.settings.translation_default,
+            self.settings.translation_default,
         ) = hom2transl(self.initial_transform)
 
         # Needed for printing transformation matrix
@@ -146,14 +121,10 @@ class PointCloudTransformUI:
         self.mat.point_size = self.settings.point_size_default
 
         self.pointclouds, self.pointcloud_names = self.load_pointclouds(ply_files)
-
-        # Center the point clouds and add them to the scene
         for i in range(len(self.pointclouds)):
-            center = self.pointclouds[i].get_center()
-            self.pointclouds[i].translate(-center)
+            self.add_pcl_to_scene(self.pointclouds[i], str(self.pointcloud_names[i]), flip=self.settings.flip)
 
-            self.pointclouds[i].transform(rot2hom(Rotation.from_euler("xz", [-90, -90], degrees=True)))  # Flip
-            self.scene.scene.add_geometry(f"{self.pointcloud_names[i]}", self.pointclouds[i], self.mat)
+        self.reset_camera_view()
 
         # Show coordinate axes
         # self.scene.scene.show_axes(True)
@@ -161,89 +132,58 @@ class PointCloudTransformUI:
         # Disable LOD downsampling to avoid culling issues (hopefully not needed).
         # self.scene.scene.downsample_threshold = 0
 
-        # Setup camera based on the largest point cloud's bounding box.
-        max_bound = max([max(pcl.get_max_bound()) for pcl in self.pointclouds])
-        self.settings.camera_view = [
-            [0, 0, 0],
-            [-max_bound, max_bound, max_bound],
-            [0, 0, 1],
-        ]  # View direction, eye position, up direction
-        self.scene.scene.camera.look_at(*self.settings.camera_view)
-
         # -------------- Slider panel --------------
         # Create the vertical slider panel.
         self.panel = gui.Vert(0.05 * em, gui.Margins(margin, margin, margin, 2 * margin))
-        # X Rotation slider
-        self.panel.add_child(gui.Label("X Rotation (deg)"))
-        self.slider_x = gui.Slider(gui.Slider.INT)
-        self.slider_x.set_limits(-self.settings.rotation_limit, self.settings.rotation_limit)
-        self.slider_x.double_value = self.settings.rot_x_default
-        self.slider_x.set_on_value_changed(self._on_slider_changed)
-        self.panel.add_child(self.slider_x)
-        # Y Rotation slider
-        self.panel.add_child(gui.Label("Y Rotation (deg)"))
-        self.slider_y = gui.Slider(gui.Slider.INT)
-        self.slider_y.set_limits(-self.settings.rotation_limit, self.settings.rotation_limit)
-        self.slider_y.double_value = self.settings.rot_y_default
-        self.slider_y.set_on_value_changed(self._on_slider_changed)
-        self.panel.add_child(self.slider_y)
-        # Z Rotation slider
-        self.panel.add_child(gui.Label("Z Rotation (deg)"))
-        self.slider_z = gui.Slider(gui.Slider.INT)
-        self.slider_z.set_limits(-self.settings.rotation_limit, self.settings.rotation_limit)
-        self.slider_z.double_value = self.settings.rot_z_default
-        self.slider_z.set_on_value_changed(self._on_slider_changed)
-        self.panel.add_child(self.slider_z)
-        # Scaling slider
-        self.panel.add_child(gui.Label("Scaling"))
-        self.slider_scale = gui.Slider(gui.Slider.DOUBLE)
-        self.slider_scale.set_limits(0.1, self.settings.scaling_limit)
-        self.slider_scale.double_value = self.settings.scale_default
-        self.slider_scale.set_on_value_changed(self._on_slider_changed)
-        self.panel.add_child(self.slider_scale)
-        # X Translation slider
-        self.panel.add_child(gui.Label("X Translation"))
-        self.slider_trans_x = gui.Slider(gui.Slider.DOUBLE)
-        self.slider_trans_x.set_limits(-self.settings.translation_limit, self.settings.translation_limit)
-        self.slider_trans_x.double_value = self.settings.trans_x_default
-        self.slider_trans_x.set_on_value_changed(self._on_slider_changed)
-        self.panel.add_child(self.slider_trans_x)
-        # Y Translation slider
-        self.panel.add_child(gui.Label("Y Translation"))
-        self.slider_trans_y = gui.Slider(gui.Slider.DOUBLE)
-        self.slider_trans_y.set_limits(-self.settings.translation_limit, self.settings.translation_limit)
-        self.slider_trans_y.double_value = self.settings.trans_y_default
-        self.slider_trans_y.set_on_value_changed(self._on_slider_changed)
-        self.panel.add_child(self.slider_trans_y)
-        # Z Translation slider
-        self.panel.add_child(gui.Label("Z Translation"))
-        self.slider_trans_z = gui.Slider(gui.Slider.DOUBLE)
-        self.slider_trans_z.set_limits(-self.settings.translation_limit, self.settings.translation_limit)
-        self.slider_trans_z.double_value = self.settings.trans_z_default
-        self.slider_trans_z.set_on_value_changed(self._on_slider_changed)
-        self.panel.add_child(self.slider_trans_z)
-        # Point size slider
-        self.panel.add_child(gui.Label("Point size"))
-        self.point_size = gui.Slider(gui.Slider.INT)
-        self.point_size.double_value = self.mat.point_size
-        self.point_size.set_limits(1, 10)
-        self.point_size.set_on_value_changed(self._on_point_size)
-        self.panel.add_child(self.point_size)
+
+        self.sliders = {}
+        for slider_key in ["rx", "ry", "rz"]:
+            self.panel.add_child(gui.Label(slider_labels[slider_key]))
+            slider = gui.Slider(gui.Slider.DOUBLE)
+            slider.set_limits(-self.settings.rotation_limit, self.settings.rotation_limit)
+            slider.double_value = self.settings.rotation_default
+            slider.set_on_value_changed(self._on_transform_slider_changed)
+            self.panel.add_child(slider)
+            self.sliders[slider_key] = slider
+        for slider_key in ["tx", "ty", "tz"]:
+            self.panel.add_child(gui.Label(slider_labels[slider_key]))
+            slider = gui.Slider(gui.Slider.DOUBLE)
+            slider.set_limits(-self.settings.translation_limit, self.settings.translation_limit)
+            slider.double_value = self.settings.translation_default
+            slider.set_on_value_changed(self._on_transform_slider_changed)
+            self.panel.add_child(slider)
+            self.sliders[slider_key] = slider
+
+        self.panel.add_child(gui.Label(slider_labels["scale"]))
+        slider = gui.Slider(gui.Slider.DOUBLE)
+        slider.set_limits(0.01, self.settings.scaling_limit)
+        slider.double_value = self.settings.scale_default
+        slider.set_on_value_changed(self._on_transform_slider_changed)
+        self.panel.add_child(slider)
+        self.sliders["scale"] = slider
+
+        self.panel.add_child(gui.Label(slider_labels["pointsize"]))
+        slider = gui.Slider(gui.Slider.INT)
+        slider.set_limits(1, self.settings.point_size_limit)
+        slider.double_value = self.mat.point_size
+        slider.set_on_value_changed(self._on_point_size_slider)
+        self.panel.add_child(slider)
+        self.sliders["pointsize"] = slider
+
         # Print button
-        self.print_button = gui.Button("Print TF")
-        self.print_button.set_on_clicked(self._on_print_tf)
-        # self.panel.add_child(self.print_button)
+        print_button = gui.Button("Print TF")
+        print_button.set_on_clicked(self._on_print_tf)
         # Reset button
-        self.reset_button = gui.Button("Reset TF")
-        self.reset_button.set_on_clicked(self._on_reset)
-        # self.panel.add_child(self.reset_button)
-        h_button = gui.Horiz()
-        h_button.add_stretch()
-        h_button.add_child(self.print_button)
-        h_button.add_fixed(0.5 * em)
-        h_button.add_child(self.reset_button)
-        h_button.add_stretch()
-        self.panel.add_child(h_button)
+        reset_button = gui.Button("Reset TF")
+        reset_button.set_on_clicked(self._on_reset)
+        # Add buttons side by side
+        button_bar = gui.Horiz()
+        button_bar.add_stretch()
+        button_bar.add_child(print_button)
+        button_bar.add_fixed(0.5 * em)
+        button_bar.add_child(reset_button)
+        button_bar.add_stretch()
+        self.panel.add_child(button_bar)
         # ------------ End Slider panel ------------
 
         # ---- Menu ----
@@ -256,7 +196,7 @@ class PointCloudTransformUI:
                 app_menu.add_separator()
                 app_menu.add_item("Quit", PointCloudTransformUI.MENU_QUIT)
             file_menu = gui.Menu()
-            # file_menu.add_item("Open...", PointCloudTransformUI.MENU_OPEN)
+            file_menu.add_item("Open...", PointCloudTransformUI.MENU_OPEN)
             file_menu.add_item("Export Current Image...", PointCloudTransformUI.MENU_EXPORT)
             if not isMacOS:
                 file_menu.add_separator()
@@ -289,8 +229,7 @@ class PointCloudTransformUI:
         # The menubar is global, but we need to connect the menu items to the
         # window, so that the window can call the appropriate function when the
         # menu item is activated.
-        # Opening new files is not supported.
-        # window.set_on_menu_item_activated(PointCloudTransformUI.MENU_OPEN, self._on_menu_open)
+        window.set_on_menu_item_activated(PointCloudTransformUI.MENU_OPEN, self._on_menu_open)
         window.set_on_menu_item_activated(PointCloudTransformUI.MENU_EXPORT, self._on_menu_export)
         window.set_on_menu_item_activated(PointCloudTransformUI.MENU_QUIT, self._on_menu_quit)
         window.set_on_menu_item_activated(
@@ -319,27 +258,29 @@ class PointCloudTransformUI:
     # ---- Menu Callbacks ----
     def _on_menu_open(self):
         dlg = gui.FileDialog(gui.FileDialog.OPEN, "Choose file to load", self.window.theme)
-        dlg.add_filter(
-            ".ply .stl .fbx .obj .off .gltf .glb",
-            "Triangle mesh files (.ply, .stl, .fbx, .obj, .off, .gltf, .glb)",
-        )
-        dlg.add_filter(
-            ".xyz .xyzn .xyzrgb .ply .pcd .pts",
-            "Point cloud files (.xyz, .xyzn, .xyzrgb, .ply, .pcd, .pts)",
-        )
-        dlg.add_filter(".ply", "Polygon files (.ply)")
-        dlg.add_filter(".stl", "Stereolithography files (.stl)")
-        dlg.add_filter(".fbx", "Autodesk Filmbox files (.fbx)")
-        dlg.add_filter(".obj", "Wavefront OBJ files (.obj)")
-        dlg.add_filter(".off", "Object file format (.off)")
-        dlg.add_filter(".gltf", "OpenGL transfer files (.gltf)")
-        dlg.add_filter(".glb", "OpenGL binary transfer files (.glb)")
-        dlg.add_filter(".xyz", "ASCII point cloud files (.xyz)")
-        dlg.add_filter(".xyzn", "ASCII point cloud with normals (.xyzn)")
-        dlg.add_filter(".xyzrgb", "ASCII point cloud files with colors (.xyzrgb)")
-        dlg.add_filter(".pcd", "Point Cloud Data files (.pcd)")
-        dlg.add_filter(".pts", "3D Points files (.pts)")
+        dlg.add_filter(".ply, .bin", "Supported files (.ply, .bin)")
         dlg.add_filter("", "All files")
+        # Other filters:
+        # dlg.add_filter(
+        #     ".ply .stl .fbx .obj .off .gltf .glb",
+        #     "Triangle mesh files (.ply, .stl, .fbx, .obj, .off, .gltf, .glb)",
+        # )
+        # dlg.add_filter(
+        #     ".xyz .xyzn .xyzrgb .ply .pcd .pts",
+        #     "Point cloud files (.xyz, .xyzn, .xyzrgb, .ply, .pcd, .pts)",
+        # )
+        # dlg.add_filter(".ply", "Polygon files (.ply)")
+        # dlg.add_filter(".stl", "Stereolithography files (.stl)")
+        # dlg.add_filter(".fbx", "Autodesk Filmbox files (.fbx)")
+        # dlg.add_filter(".obj", "Wavefront OBJ files (.obj)")
+        # dlg.add_filter(".off", "Object file format (.off)")
+        # dlg.add_filter(".gltf", "OpenGL transfer files (.gltf)")
+        # dlg.add_filter(".glb", "OpenGL binary transfer files (.glb)")
+        # dlg.add_filter(".xyz", "ASCII point cloud files (.xyz)")
+        # dlg.add_filter(".xyzn", "ASCII point cloud with normals (.xyzn)")
+        # dlg.add_filter(".xyzrgb", "ASCII point cloud files with colors (.xyzrgb)")
+        # dlg.add_filter(".pcd", "Point Cloud Data files (.pcd)")
+        # dlg.add_filter(".pts", "3D Points files (.pts)")
 
         # A file dialog MUST define on_cancel and on_done functions
         dlg.set_on_cancel(self._on_file_dialog_cancel)
@@ -351,7 +292,13 @@ class PointCloudTransformUI:
 
     def _on_load_dialog_done(self, filename):
         self.window.close_dialog()
-        self.load(filename)
+
+        pointclouds, pointcloud_names = self.load_pointclouds([filename])
+        self.pointclouds.extend(pointclouds)
+        self.pointcloud_names.extend(pointcloud_names)
+        for i in range(len(pointclouds)):
+            self.add_pcl_to_scene(pointclouds[i], str(pointcloud_names[i]), flip=self.settings.flip)
+        self.reset_camera_view()
 
     def _on_menu_export(self):
         dlg = gui.FileDialog(gui.FileDialog.SAVE, "Choose file to save", self.window.theme)
@@ -415,19 +362,19 @@ class PointCloudTransformUI:
     # ---- End Menu Callbacks ----
 
     # ---- Panel Callbacks ----
-    def _on_slider_changed(self, new_value):
+    def _on_transform_slider_changed(self, new_value):
         # Retrieve slider values.
-        x_deg = self.slider_x.double_value
-        y_deg = self.slider_y.double_value
-        z_deg = self.slider_z.double_value
+        x_deg = self.sliders["rx"].double_value
+        y_deg = self.sliders["ry"].double_value
+        z_deg = self.sliders["rz"].double_value
         x_rad = math.radians(x_deg)
         y_rad = math.radians(y_deg)
         z_rad = math.radians(z_deg)
 
-        scale = self.slider_scale.double_value
-        trans_x = self.slider_trans_x.double_value
-        trans_y = self.slider_trans_y.double_value
-        trans_z = self.slider_trans_z.double_value
+        scale = self.sliders["scale"].double_value
+        trans_x = self.sliders["tx"].double_value
+        trans_y = self.sliders["ty"].double_value
+        trans_z = self.sliders["tz"].double_value
 
         Rx = np.array(
             [
@@ -454,18 +401,17 @@ class PointCloudTransformUI:
         self.R = Rz @ Ry @ Rx
 
         # Create transformation matrix with scaling and translation
-        T = rot_transl2hom(scale * self.R, [trans_x, trans_y, trans_z])
-        self.homogeneous_transform = T
+        self.homogeneous_transform = rot_transl2hom(scale * self.R, [trans_x, trans_y, trans_z])
 
         # Update point cloud transformation.
-        self.scene.scene.set_geometry_transform(f"{self.pointcloud_names[-1]}", self.homogeneous_transform)
+        self.scene.scene.set_geometry_transform(f"{str(self.pointcloud_names[-1])}", self.homogeneous_transform)
         self.scene.force_redraw()
 
     def _on_print_tf(self):
         with np.printoptions(suppress=True):
             print("Transformation matrix:")
             print(self.homogeneous_transform)
-            print(f"Scale: {self.slider_scale.double_value}")
+            print(f"Scale: {self.sliders['scale'].double_value}")
             T = np.eye(4)
             T[:3, :3] = self.R
             T[:3, 3] = self.homogeneous_transform[:3, 3]
@@ -474,18 +420,18 @@ class PointCloudTransformUI:
 
     def _on_reset(self):
         """Reset transformation sliders to their default values."""
-        self.slider_x.double_value = self.settings.rot_x_default
-        self.slider_y.double_value = self.settings.rot_y_default
-        self.slider_z.double_value = self.settings.rot_z_default
-        self.slider_scale.double_value = self.settings.scale_default
-        self.slider_trans_x.double_value = self.settings.trans_x_default
-        self.slider_trans_y.double_value = self.settings.trans_y_default
-        self.slider_trans_z.double_value = self.settings.trans_z_default
-        self._on_slider_changed(0)
+        self.sliders["rx"].double_value = self.settings.rotation_default
+        self.sliders["ry"].double_value = self.settings.rotation_default
+        self.sliders["rz"].double_value = self.settings.rotation_default
+        self.sliders["scale"].double_value = self.settings.scale_default
+        self.sliders["tx"].double_value = self.settings.translation_default
+        self.sliders["ty"].double_value = self.settings.translation_default
+        self.sliders["tz"].double_value = self.settings.translation_default
+        self._on_transform_slider_changed(0)
         self.scene.scene.camera.look_at(*self.settings.camera_view)
         self.scene.force_redraw()
 
-    def _on_point_size(self, size):
+    def _on_point_size_slider(self, size):
         self.mat.point_size = int(size)
         self.scene.scene.update_material(self.mat)
 
@@ -515,7 +461,19 @@ class PointCloudTransformUI:
         colors = cmap(intensities_norm)[:, :3]  # Exclude alpha channel if present.
         return colors
 
-    def load_pcl_from_bin(self, filename: str | Path, colormap: str = "rainbow"):
+    def load_pointcloud(self, filename: str | Path) -> o3d.geometry.PointCloud:
+        """
+        Load point cloud from a file. The file can be in PLY or BIN format.
+        """
+        filename = Path(filename)
+        if filename.suffix == ".ply":
+            return self.load_pcl_from_ply(filename)
+        elif filename.suffix == ".bin":
+            return self.load_pcl_from_bin(filename)
+        else:
+            raise ValueError("Unsupported file format. Only .ply and .bin files are supported.")
+
+    def load_pcl_from_bin(self, filename: str | Path, colormap: str = "rainbow") -> o3d.geometry.PointCloud:
         """
         Load point cloud from binary file. The binary file should contain 4 floats per point: x, y, z, intensity
         """
@@ -560,20 +518,47 @@ class PointCloudTransformUI:
         """
         Load point clouds from a list of PLY files.
         """
-        if len(filenames) > 2:
-            raise ValueError("Max two point clouds can be visualized at a time.")
+        # if len(filenames) > 2:
+        #     raise ValueError("Max two point clouds can be visualized at a time.")
 
         pointclouds = []
         pointcloud_names = []
         for file in filenames:
-            file_path = Path(file) if isinstance(file, str) else file
-            if file_path.suffix == ".ply":
-                pointclouds.append(self.load_pcl_from_ply(file))
-            if file_path.suffix == ".bin":
-                pointclouds.append(self.load_pcl_from_bin(file))
-            pointcloud_names.append(file_path)
+            file = Path(file)
+            pointclouds.append(self.load_pointcloud(file))
+            pointcloud_names.append(file)
 
         return pointclouds, pointcloud_names
+
+    def add_pcl_to_scene(
+        self, pointcloud: o3d.geometry.PointCloud, pointcloud_name: str, pose: np.ndarray = None, flip: bool = False
+    ):
+        """
+        Add a point cloud to the scene in the given pose (or to the center of the scene if no pose is given).
+
+        Args:
+            pointcloud (o3d.geometry.PointCloud): The point cloud to add.
+            pointcloud_name (str): The name of the point cloud.
+            pose (np.ndarray, optional): The pose transformation to apply to the point cloud. Defaults to None.
+            flip (bool, optional): Whether to flip the point cloud upside down. Defaults to False.
+        """
+        center = pointcloud.get_center()
+        pointcloud.translate(-center)
+        if pose is not None:
+            pointcloud.transform(pose)
+        if flip:
+            pointcloud.transform(rot2hom(Rotation.from_euler("xz", [-90, -90], degrees=True)))
+        self.scene.scene.add_geometry(f"{pointcloud_name}", pointcloud, self.mat)
+
+    def reset_camera_view(self):
+        # Setup camera based on the largest point cloud's bounding box.
+        max_bound = max([max(pcl.get_max_bound()) for pcl in self.pointclouds])
+        self.settings.camera_view = [
+            [0, 0, 0],
+            [-max_bound, max_bound, max_bound],
+            [0, 0, 1],
+        ]  # View direction, eye position, up direction
+        self.scene.scene.camera.look_at(*self.settings.camera_view)
 
     def on_layout(self, layout_context):
         # The on_layout callback should set the frame (position + size) of every
@@ -612,7 +597,6 @@ def main(pcl_files, initial_transform=None):
     else:
         PointCloudTransformUI(window, pcl_files)
     gui.Application.instance.run()
-    window.close()
 
 
 if __name__ == "__main__":
@@ -625,28 +609,18 @@ if __name__ == "__main__":
     parser.add_argument(
         "pointclouds",
         type=str,
-        nargs="*",
-        default=[],
-        help="Point cloud files (leave empty to use defaults)",
+        nargs="+",
+        help="Path of one or more point cloud files.",
     )
     parser.add_argument("-t", "--initial-transform", type=str, help="Initial transformation matrix")
     args = parser.parse_args()
     pcl_files = []
-    if args.pointclouds:
-        for sysarg in sys.argv[1:]:
-            if not Path.exists(Path(sysarg)):
-                raise FileNotFoundError("Error", "Could not open file '" + sysarg + "'")
-            if Path(sysarg).suffix not in [".ply", ".bin"]:
-                raise ValueError("Error", "Only .ply and .bin files are supported")
-            pcl_files.append(sysarg)
-    else:
-        pcl_files = [
-            "/media/epe/HDD/KITTI-360/depth_vis_metric_pcl_test/data_2d_raw/2013_05_28_drive_0000_sync/image_00/data_rect_small/0000000093.ply",
-            "/home/epe/Downloads/0000000093.bin",
-        ]
+    for sysarg in sys.argv[1:]:
+        if not Path.exists(Path(sysarg)):
+            raise FileNotFoundError("Could not open file '" + sysarg + "'")
+        if Path(sysarg).suffix not in [".ply", ".bin"]:
+            raise ValueError("Only .ply and .bin files are supported")
+        pcl_files.append(sysarg)
     initial_transform = np.loadtxt(args.initial_transform) if args.initial_transform else None
-    # initial_transform = np.loadtxt("/media/epe/HDD/KITTI-360/raw/calibration/calib_cam_to_velo.txt")
-    # initial_transform = initial_transform.reshape(3, 4)
-    # initial_transform = np.concatenate((initial_transform, np.array([0, 0, 0, 1]).reshape(1, 4)))
 
     main(pcl_files, initial_transform)
