@@ -43,7 +43,8 @@ class Settings:
     # Flip point clouds
     flip = True
 
-    #
+    # Background color
+    background_color = np.array([240, 210, 170, 255]) / 255  # RGBA
 
     # Camera view
     camera_view = [
@@ -169,9 +170,7 @@ class PointCloudTransformUI:
         # Create a SceneWidget for 3D rendering.
         self.scene = gui.SceneWidget()
         self.scene.scene = rendering.Open3DScene(self.window.renderer)
-        # self.scene.scene.set_background([255, 255, 255, 1])
-        self.scene.scene.set_background([110, 0, 0, 1])
-        # self.scene.scene.set_background([0, 0, 255, 1])
+        self.scene.scene.set_background(self.settings.background_color)
 
         self.mat = rendering.MaterialRecord()
         self.mat.shader = "defaultUnlit"
@@ -245,6 +244,14 @@ class PointCloudTransformUI:
         button_bar.add_child(reset_button)
         button_bar.add_stretch()
         self.panel.add_child(button_bar)
+
+        # Create a color picker panel
+        self.background_color_picker = gui.ColorEdit()
+        self.background_color_picker.color_value = gui.Color(*self.settings.background_color)
+        self.background_color_picker.set_on_value_changed(self._on_background_color_changed)
+
+        self.panel.add_child(gui.Label("Background color:"))
+        self.panel.add_child(self.background_color_picker)
         # ------------ End Slider panel ------------
 
         # ---- Menu ----
@@ -424,6 +431,7 @@ class PointCloudTransformUI:
 
     # ---- End Menu Callbacks ----
 
+    # ---- Panel Callbacks ----
     def _on_transform_slider_changed(self, new_value):
         # Retrieve slider values.
         x_deg = self.sliders["rx"].double_value
@@ -471,6 +479,10 @@ class PointCloudTransformUI:
     def _on_point_size_slider(self, size):
         self.mat.point_size = int(size)
         self.scene.scene.update_material(self.mat)
+
+    def _on_background_color_changed(self, new_color):
+        # Update material color
+        self.scene.scene.set_background([new_color.red, new_color.green, new_color.blue, 1.0])
 
     # ---- End Panel Callbacks ----
 
