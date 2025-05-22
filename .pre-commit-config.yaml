@@ -14,7 +14,7 @@ repos:
   rev: v0.11.10
   hooks:
     # Run the linter.
-    - id: ruff
+    - id: ruff-check
       types_or: [ python, pyi ]  # Ignore jupyter notebooks
       args: [ --fix ]
     # Run the formatter.

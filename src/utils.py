@@ -37,7 +37,9 @@ def hom2transl(T: np.ndarray) -> np.ndarray:
     return T[:3, 3]
 
 
-def rotxyz2rotmat(rot_x: float, rot_y: float, rot_z: float, units: Literal["deg", "rad"] = "rad") -> np.ndarray[float]:
+def roteuler2rotmat(
+    rot_x: float, rot_y: float, rot_z: float, units: Literal["deg", "rad"] = "rad"
+) -> np.ndarray[float]:
     """
     Convert Euler angles into a 3x3 rotation matrix.
     The rotation is applied in the order of X, Y, Z.

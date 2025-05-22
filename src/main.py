@@ -2,7 +2,7 @@ from datetime import datetime
 from pathlib import Path
 import platform
 import sys
-from typing import Tuple
+from typing import Literal, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -11,7 +11,7 @@ import open3d.visualization.gui as gui
 import open3d.visualization.rendering as rendering
 from scipy.spatial.transform import Rotation
 
-from utils import hom2rot, hom2transl, rot2hom, rot_transl2hom, rotxyz2rotmat
+from utils import hom2rot, hom2transl, rot2hom, rot_transl2hom, roteuler2rotmat
 
 
 isMacOS = platform.system() == "Darwin"
@@ -53,6 +53,63 @@ class Settings:
     ]  # View direction, eye position, up direction
 
 
+class PosedPointCloud:
+    """
+    A point cloud wrapper class with an associated pose and other metadata.
+    """
+
+    def __repr__(self):
+        return f"PosedPointCloud(origin={self.origin},\npose={self.pose},\nscale={self.scale})"
+
+    def __init__(
+        self,
+        pcd: o3d.geometry.PointCloud,
+        origin: str | Path = "",
+        pose: np.ndarray | None = np.eye(4),
+        scale: float | None = 1.0,
+    ):
+        """
+        Initialize the point cloud with an optional pose.
+
+        Args:
+            pcd (o3d.geometry.PointCloud): The point cloud to be wrapped.
+            origin (str | Path): The origin of the point cloud. Used for naming.
+            pose (np.ndarray): The pose homogeneous transformation matrix (4x4).
+            scale (float): A scale factor for the point cloud.
+        """
+        self.pcd = pcd
+        self.scale = scale
+        self.origin = origin
+        self.name = origin.stem if isinstance(origin, Path) else origin
+
+        if pose is None:
+            pose = np.eye(4)
+        self.set_pose(pose)
+        if scale is None:
+            scale = 1.0
+        self.set_scale(scale)
+
+    def set_pose(self, pose: np.ndarray[tuple[Literal[4, 4]], np.dtype[np.float64]]):
+        """
+        Set the pose of the point cloud.
+
+        Args:
+            pose (np.ndarray): The new pose homogeneous transformation matrix (4x4).
+        """
+        self.pose = pose
+        self.pcd.transform(pose)
+
+    def set_scale(self, scale: float):
+        """
+        Set the scale of the point cloud.
+
+        Args:
+            scale (float): The new scale factor.
+        """
+        self.scale = scale
+        self.pcd.scale(self.scale, center=self.pcd.get_center())
+
+
 class PointCloudTransformUI:
     """
     A simple GUI for visualizing and transforming point clouds using Open3D.
@@ -73,7 +130,7 @@ class PointCloudTransformUI:
     ):
         self.settings = Settings()
 
-        self.pointclouds: list[o3d.geometry.PointCloud] = []
+        self.pointclouds: list[PosedPointCloud] = []
         self.pointcloud_names: list[str | Path] = []
 
         if initial_transform.size != 16:
@@ -102,7 +159,7 @@ class PointCloudTransformUI:
         # Load point clouds
         self.pointclouds, self.pointcloud_names = self.load_pointclouds(ply_files)
         for i in range(len(self.pointclouds)):
-            self.add_pcl_to_scene(self.pointclouds[i], str(self.pointcloud_names[i]), flip=self.settings.flip)
+            self.add_pointcloud_to_scene(self.pointclouds[i], flip=self.settings.flip)
         self.reset_camera_view()
 
     def setup_ui(self):
@@ -304,7 +361,7 @@ class PointCloudTransformUI:
         self.pointclouds.extend(pointclouds)
         self.pointcloud_names.extend(pointcloud_names)
         for i in range(len(pointclouds)):
-            self.add_pcl_to_scene(pointclouds[i], str(pointcloud_names[i]), flip=self.settings.flip)
+            self.add_pointcloud_to_scene(pointclouds[i], flip=self.settings.flip)
         self.reset_camera_view()
 
     def _on_menu_export(self):
@@ -367,7 +424,6 @@ class PointCloudTransformUI:
 
     # ---- End Menu Callbacks ----
 
-    # ---- Panel Callbacks ----
     def _on_transform_slider_changed(self, new_value):
         # Retrieve slider values.
         x_deg = self.sliders["rx"].double_value
@@ -379,7 +435,7 @@ class PointCloudTransformUI:
         trans_y = self.sliders["ty"].double_value
         trans_z = self.sliders["tz"].double_value
 
-        self.R = rotxyz2rotmat(x_deg, y_deg, z_deg, units="deg")
+        self.R = roteuler2rotmat(x_deg, y_deg, z_deg, units="deg")
 
         # Create transformation matrix with scaling and translation
         self.homogeneous_transform = rot_transl2hom(scale * self.R, [trans_x, trans_y, trans_z])
@@ -452,19 +508,21 @@ class PointCloudTransformUI:
         colors = cmap(intensities_norm)[:, :3]  # Exclude alpha channel if present.
         return colors
 
-    def load_pointcloud(self, filename: str | Path) -> o3d.geometry.PointCloud:
+    def load_posed_pointcloud(self, filename: str | Path, pose=None, scale=None) -> PosedPointCloud:
         """
         Load point cloud from a file. The file can be in PLY or BIN format.
         """
         filename = Path(filename)
         if filename.suffix == ".ply":
-            return self.load_pcl_from_ply(filename)
+            pcd = self.load_pcd_from_ply(filename)
         elif filename.suffix == ".bin":
-            return self.load_pcl_from_bin(filename)
+            pcd = self.load_pcd_from_bin(filename)
         else:
             raise ValueError("Unsupported file format. Only .ply and .bin files are supported.")
 
-    def load_pcl_from_bin(self, filename: str | Path, colormap: str = "rainbow") -> o3d.geometry.PointCloud:
+        return PosedPointCloud(pcd=pcd, origin=filename, pose=pose, scale=scale)
+
+    def load_pcd_from_bin(self, filename: str | Path, colormap: str = "rainbow") -> o3d.geometry.PointCloud:
         """
         Load point cloud from binary file. The binary file should contain 4 floats per point: x, y, z, intensity
         """
@@ -480,7 +538,7 @@ class PointCloudTransformUI:
 
         return pcd
 
-    def load_pcl_from_ply(self, filename: str | Path, convert_srgb: bool = True) -> o3d.geometry.PointCloud:
+    def load_pcd_from_ply(self, filename: str | Path, convert_srgb: bool = True) -> o3d.geometry.PointCloud:
         """
         Load point cloud from a PLY file. Standardizes the point cloud by converting colors to linear
         """
@@ -497,24 +555,25 @@ class PointCloudTransformUI:
 
     def load_pointclouds(
         self, filenames: list[str | Path], convert_srgb: bool = True
-    ) -> Tuple[list[o3d.geometry.PointCloud], list[Path]]:
+    ) -> Tuple[list[PosedPointCloud], list[Path]]:
         """
         Load point clouds from a list of PLY files.
         """
-        # if len(filenames) > 2:
-        #     raise ValueError("Max two point clouds can be visualized at a time.")
-
         pointclouds = []
         pointcloud_names = []
         for file in filenames:
             file = Path(file)
-            pointclouds.append(self.load_pointcloud(file))
+            pointclouds.append(self.load_posed_pointcloud(file))
             pointcloud_names.append(file)
 
         return pointclouds, pointcloud_names
 
     def add_pcl_to_scene(
-        self, pointcloud: o3d.geometry.PointCloud, pointcloud_name: str, pose: np.ndarray = None, flip: bool = False
+        self,
+        pointcloud: o3d.geometry.PointCloud,
+        pointcloud_name: str,
+        pose: np.ndarray | None = None,
+        flip: bool = False,
     ):
         """
         Add a point cloud to the scene in the given pose (or to the center of the scene if no pose is given).
@@ -533,10 +592,22 @@ class PointCloudTransformUI:
             pointcloud.transform(rot2hom(Rotation.from_euler("xz", [-90, -90], degrees=True)))
         self.scene.scene.add_geometry(f"{pointcloud_name}", pointcloud, self.mat)
 
+    def add_pointcloud_to_scene(self, pointcloud: PosedPointCloud, flip: bool = False):
+        """
+        Add a point cloud to the scene in the given pose (or to the center of the scene if no pose is given).
+
+        Args:
+            pointcloud (PosedPointCloud): The point cloud to add.
+            flip (bool, optional): Whether to flip the point cloud upside down. Defaults to False.
+        """
+        if flip:
+            pointcloud.pcd.transform(rot2hom(Rotation.from_euler("xz", [-90, -90], degrees=True)))
+        self.scene.scene.add_geometry(f"{pointcloud.origin}", pointcloud.pcd, self.mat)
+
     def reset_camera_view(self):
         # Setup camera based on the combined bounding box of all point clouds.
-        max_bound = np.max(np.array([pcl.get_max_bound() for pcl in self.pointclouds]), axis=0)
-        min_bound = np.min(np.array([pcl.get_min_bound() for pcl in self.pointclouds]), axis=0)
+        max_bound = np.max(np.array([pointcloud.pcd.get_max_bound() for pointcloud in self.pointclouds]), axis=0)
+        min_bound = np.min(np.array([pointcloud.pcd.get_min_bound() for pointcloud in self.pointclouds]), axis=0)
         combined_bbox = o3d.geometry.AxisAlignedBoundingBox(min_bound, max_bound)
         # combined_center = combined_bbox.get_center()
         combined_half_extent = combined_bbox.get_half_extent()
