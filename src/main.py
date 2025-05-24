@@ -60,28 +60,31 @@ class PosedPointCloud:
     """
 
     def __repr__(self):
-        return f"PosedPointCloud(origin={self.origin},\npose={self.pose},\nscale={self.scale})"
+        return (
+            f"PosedPointCloud(created_from={self.created_from},\npose={self.pose},\nscale={self.scale},\nid={self.id})"
+        )
 
     def __init__(
         self,
         pcd: o3d.geometry.PointCloud,
-        origin: str | Path = "",
+        created_from: str | Path = "",
         pose: np.ndarray | None = np.eye(4),
         scale: float | None = 1.0,
     ):
         """
-        Initialize the point cloud with an optional pose.
+        A point cloud with an optional pose.
 
         Args:
             pcd (o3d.geometry.PointCloud): The point cloud to be wrapped.
-            origin (str | Path): The origin of the point cloud. Used for naming.
+            created_from (str | Path): The source of the point cloud. Used for naming.
             pose (np.ndarray): The pose homogeneous transformation matrix (4x4).
             scale (float): A scale factor for the point cloud.
         """
         self.pcd = pcd
         self.scale = scale
-        self.origin = origin
-        self.name = origin.stem if isinstance(origin, Path) else origin
+        self.created_from = created_from
+        self.name = created_from.stem if isinstance(created_from, Path) else created_from
+        self.id = hash(str(self.created_from) + str(datetime.now().timestamp()))  # Unique ID of the point cloud
 
         if pose is None:
             pose = np.eye(4)
@@ -532,7 +535,7 @@ class PointCloudTransformUI:
         else:
             raise ValueError("Unsupported file format. Only .ply and .bin files are supported.")
 
-        return PosedPointCloud(pcd=pcd, origin=filename, pose=pose, scale=scale)
+        return PosedPointCloud(pcd=pcd, created_from=filename, pose=pose, scale=scale)
 
     def load_pcd_from_bin(self, filename: str | Path, colormap: str = "rainbow") -> o3d.geometry.PointCloud:
         """
@@ -614,7 +617,7 @@ class PointCloudTransformUI:
         """
         if flip:
             pointcloud.pcd.transform(rot2hom(Rotation.from_euler("xz", [-90, -90], degrees=True)))
-        self.scene.scene.add_geometry(f"{pointcloud.origin}", pointcloud.pcd, self.mat)
+        self.scene.scene.add_geometry(f"{pointcloud.id}", pointcloud.pcd, self.mat)
 
     def reset_camera_view(self):
         # Setup camera based on the combined bounding box of all point clouds.
