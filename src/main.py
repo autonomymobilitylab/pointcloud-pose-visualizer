@@ -689,13 +689,22 @@ if __name__ == "__main__":
     )
     parser.add_argument("-t", "--initial-transform", type=str, help="Initial transformation matrix")
     args = parser.parse_args()
+    supported_filetypes = [".ply", ".bin"]
     pcl_files = []
     for sysarg in sys.argv[1:]:
-        if not Path.exists(Path(sysarg)):
-            raise FileNotFoundError("Could not open file '" + sysarg + "'")
-        if Path(sysarg).suffix not in [".ply", ".bin"]:
-            raise ValueError("Only .ply and .bin files are supported")
-        pcl_files.append(sysarg)
+        pcl_path = Path(sysarg)
+        if not pcl_path.exists():
+            raise FileNotFoundError("Could not open file or folder '" + sysarg + "'")
+        if pcl_path.is_dir():
+            for extension in supported_filetypes:
+                pcl_files.extend(sorted(pcl_path.glob(f"*{extension}")))
+            if len(pcl_files) == 0:
+                raise FileNotFoundError(f"No point clouds found in folder '{str(pcl_path)}'")
+            print(f"Found {len(pcl_files)} point clouds in {pcl_path}")
+        else:
+            if pcl_path.suffix not in supported_filetypes:
+                raise ValueError("Only {} files are supported".format(", ".join(supported_filetypes)))
+            pcl_files.append(Path(sysarg))
     initial_transform = np.loadtxt(args.initial_transform) if args.initial_transform else None
 
     main(pcl_files, initial_transform)
