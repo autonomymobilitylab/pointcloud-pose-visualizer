@@ -189,6 +189,14 @@ class PointCloudTransformUI:
         # Create the vertical slider panel.
         self.panel = gui.Vert(0.05 * em, gui.Margins(margin, margin, margin, 2 * margin))
 
+        # Point cloud selector
+        self.dropdown = gui.Combobox()
+        for pointcloud in self.pointclouds:
+            self.dropdown.add_item(pointcloud.name)
+        self.dropdown.selected_index = 0
+        self.dropdown.set_on_selection_changed(self._on_dropdown_changed)
+        self.panel.add_child(self.dropdown)
+
         slider_labels = {
             "rx": "X Rotation (deg)",
             "ry": "Y Rotation (deg)",
@@ -200,6 +208,8 @@ class PointCloudTransformUI:
             "pointsize": "Point size",
         }
         self.sliders = {}
+
+        # Rotation sliders
         for slider_key in ["rx", "ry", "rz"]:
             self.panel.add_child(gui.Label(slider_labels[slider_key]))
             slider = gui.Slider(gui.Slider.DOUBLE)
@@ -208,6 +218,8 @@ class PointCloudTransformUI:
             slider.set_on_value_changed(self._on_transform_slider_changed)
             self.panel.add_child(slider)
             self.sliders[slider_key] = slider
+
+        # Translation sliders
         for slider_key in ["tx", "ty", "tz"]:
             self.panel.add_child(gui.Label(slider_labels[slider_key]))
             slider = gui.Slider(gui.Slider.DOUBLE)
@@ -217,6 +229,7 @@ class PointCloudTransformUI:
             self.panel.add_child(slider)
             self.sliders[slider_key] = slider
 
+        # Point cloud scale slider
         self.panel.add_child(gui.Label(slider_labels["scale"]))
         slider = gui.Slider(gui.Slider.DOUBLE)
         slider.set_limits(0.01, self.settings.scaling_limit)
@@ -225,6 +238,7 @@ class PointCloudTransformUI:
         self.panel.add_child(slider)
         self.sliders["scale"] = slider
 
+        # Point size slider
         self.panel.add_child(gui.Label(slider_labels["pointsize"]))
         slider = gui.Slider(gui.Slider.INT)
         slider.set_limits(1, self.settings.point_size_limit)
@@ -313,8 +327,8 @@ class PointCloudTransformUI:
 
         # ---- Info bar ----
         self.infobar = gui.Horiz(0, gui.Margins(0.25 * em, 0.25 * em, 0.25 * em, 0))
-        if len(self.pointcloud_names) > 0:
-            infobartext = "Point clouds:\n{}".format(*[name for name in self.pointcloud_names])
+        if len(self.pointclouds) > 0:
+            infobartext = "Point clouds:\n{}".format(*[pointcloud.name for pointcloud in self.pointclouds])
         else:
             infobartext = "No point clouds loaded."
         self.infobar.add_child(gui.Label(infobartext))
@@ -356,7 +370,6 @@ class PointCloudTransformUI:
         # dlg.add_filter(".pcd", "Point Cloud Data files (.pcd)")
         # dlg.add_filter(".pts", "3D Points files (.pts)")
 
-        # A file dialog MUST define on_cancel and on_done functions
         dlg.set_on_cancel(self._on_file_dialog_cancel)
         dlg.set_on_done(self._on_load_dialog_done)
         self.window.show_dialog(dlg)
@@ -372,7 +385,7 @@ class PointCloudTransformUI:
         self.pointcloud_names.extend(pointcloud_names)
         for i in range(len(pointclouds)):
             self.add_pointcloud_to_scene(pointclouds[i], flip=self.settings.flip)
-        self.reset_camera_view()
+        # self.reset_camera_view()
 
     def _on_menu_export(self):
         dlg = gui.FileDialog(gui.FileDialog.SAVE, "Choose file to save", self.window.theme)
@@ -435,6 +448,20 @@ class PointCloudTransformUI:
     # ---- End Menu Callbacks ----
 
     # ---- Panel Callbacks ----
+    def _on_dropdown_changed(self, text, index):
+        """
+        Callback for when the dropdown selection changes.
+        Updates the sliders to match the selected point cloud's pose.
+        """
+        selected_pcd = self.pointclouds[index]
+        self.sliders["rx"].double_value, self.sliders["ry"].double_value, self.sliders["rz"].double_value = (
+            Rotation.from_matrix(hom2rot(selected_pcd.pose)).as_euler("xyz", degrees=True)
+        )
+        self.sliders["tx"].double_value, self.sliders["ty"].double_value, self.sliders["tz"].double_value = hom2transl(
+            selected_pcd.pose
+        )
+        self.sliders["scale"].double_value = selected_pcd.scale
+
     def _on_transform_slider_changed(self, new_value):
         # Retrieve slider values.
         x_deg = self.sliders["rx"].double_value
@@ -452,7 +479,9 @@ class PointCloudTransformUI:
         self.homogeneous_transform = rot_transl2hom(scale * self.R, [trans_x, trans_y, trans_z])
 
         # Update point cloud transformation.
-        self.scene.scene.set_geometry_transform(f"{str(self.pointcloud_names[-1])}", self.homogeneous_transform)
+        active_pointcloud = self.pointclouds[self.dropdown.selected_index]
+        active_pointcloud.set_pose(self.homogeneous_transform)
+        self.scene.scene.set_geometry_transform(f"{active_pointcloud.id}", self.homogeneous_transform)
         self.scene.force_redraw()
 
     def _on_print_tf(self):
@@ -568,9 +597,7 @@ class PointCloudTransformUI:
 
         return pcd
 
-    def load_pointclouds(
-        self, filenames: list[str | Path], convert_srgb: bool = True
-    ) -> Tuple[list[PosedPointCloud], list[Path]]:
+    def load_pointclouds(self, filenames: list[str | Path]) -> Tuple[list[PosedPointCloud], list[Path]]:
         """
         Load point clouds from a list of PLY files.
         """
@@ -618,6 +645,7 @@ class PointCloudTransformUI:
         if flip:
             pointcloud.pcd.transform(rot2hom(Rotation.from_euler("xz", [-90, -90], degrees=True)))
         self.scene.scene.add_geometry(f"{pointcloud.id}", pointcloud.pcd, self.mat)
+        self.dropdown.add_item(pointcloud.name)
 
     def reset_camera_view(self):
         # Setup camera based on the combined bounding box of all point clouds.
