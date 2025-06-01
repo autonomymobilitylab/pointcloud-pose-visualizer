@@ -22,31 +22,22 @@ class Settings:
     Default settings for the point cloud transformation UI.
     """
 
-    # Rotation defaults
-    rotation_default = 0  # (in degrees)
-
-    # Scale default
-    scale_default = 1.0
-
-    # Translation defaults
     translation_default = 0.0
-
-    # Point size default
+    rotation_default = 0  # (in degrees)
+    scale_default = 1.0
     point_size_default = 2
 
-    # Limits
-    rotation_limit = 180
-    scaling_limit = 3.0
-    translation_limit = 50.0
-    point_size_limit = 6
+    rotation_limit = 180  # min and max (in degrees)
+    scaling_limit = 3.0  # max
+    translation_limit = 50.0  # min and max
+    point_size_limit = 6  # max
 
-    # Flip point clouds
+    # Flip point clouds in the scene
+    # This is useful for point clouds that are upside down, e.g. from a camera
     flip = True
 
-    # Background color
     background_color = np.array([240, 210, 170, 255]) / 255  # RGBA
 
-    # Camera view
     camera_view = [
         [0, 0, 0],
         [-60, -60, 60],
