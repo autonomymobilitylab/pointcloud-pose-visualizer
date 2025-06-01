@@ -25,3 +25,7 @@ dev = [
     "pre-commit",
     "ruff",
 ]
+
+[project.scripts]
+pointcloud-visualizer = "main:cli"
+pviz = "main:cli"

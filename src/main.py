@@ -1,9 +1,9 @@
 from datetime import datetime
 from pathlib import Path
 import platform
-import sys
-from typing import Literal, Tuple
+from typing import Literal
 
+import click
 import matplotlib.pyplot as plt
 import numpy as np
 import open3d as o3d
@@ -68,7 +68,7 @@ class PosedPointCloud:
         self,
         pcd: o3d.geometry.PointCloud,
         created_from: str | Path = "",
-        pose: np.ndarray | None = np.eye(4),
+        pose: np.ndarray[tuple[Literal[4, 4]], np.dtype[np.float64]] | None = np.eye(4),
         scale: float | None = 1.0,
     ):
         """
@@ -100,6 +100,8 @@ class PosedPointCloud:
         Args:
             pose (np.ndarray): The new pose homogeneous transformation matrix (4x4).
         """
+        if pose.shape != (4, 4):
+            raise ValueError("Pose must be a 4x4 matrix.")
         self.pose = pose
         self.pcd.transform(pose)
 
@@ -110,6 +112,8 @@ class PosedPointCloud:
         Args:
             scale (float): The new scale factor.
         """
+        if scale <= 0:
+            raise ValueError("Scale must be a positive number.")
         self.scale = scale
         self.pcd.scale(self.scale, center=self.pcd.get_center())
 
@@ -130,40 +134,33 @@ class PointCloudTransformUI:
         self,
         window,
         ply_files: list[str | Path],
-        initial_transform: np.ndarray = np.eye(4),
+        pose_file: str | Path | None = None,
     ):
         self.settings = Settings()
 
         self.pointclouds: list[PosedPointCloud] = []
-        self.pointcloud_names: list[str | Path] = []
-
-        if initial_transform.size != 16:
-            raise ValueError("Initial transformation matrix must be a 4x4 matrix.")
-        initial_transform = initial_transform.reshape(4, 4)
-        self.initial_transform = initial_transform
-        (
-            self.settings.rotation_default,
-            self.settings.rotation_default,
-            self.settings.rotation_default,
-        ) = Rotation.from_matrix(hom2rot(self.initial_transform)).as_euler("xyz", degrees=True)
-        (
-            self.settings.translation_default,
-            self.settings.translation_default,
-            self.settings.translation_default,
-        ) = hom2transl(self.initial_transform)
-
-        # Needed for printing transformation matrix
-        self.homogeneous_transform = self.initial_transform
-        self.R = np.eye(3)
 
         # Create a window
         self.window = window
         self.setup_ui()
 
         # Load point clouds
-        self.pointclouds, self.pointcloud_names = self.load_pointclouds(ply_files)
+        self.pointclouds = self.load_pointclouds(ply_files)
         for i in range(len(self.pointclouds)):
             self.add_pointcloud_to_scene(self.pointclouds[i], flip=self.settings.flip)
+
+        if pose_file:
+            poses = self.load_poses(pose_file)
+            if len(poses) != len(self.pointclouds):
+                raise ValueError(
+                    f"Number of poses ({len(poses)}) does not match number of point clouds ({len(self.pointclouds)})."
+                )
+            for i in range(len(poses)):
+                self.pointclouds[i].set_pose(poses[i])
+                self.scene.scene.set_geometry_transform(f"{self.pointclouds[i].id}", self.pointclouds[i].pose)
+
+            self.set_slider_to_pose(self.pointclouds[self.dropdown.selected_index])
+
         self.reset_camera_view()
 
     def setup_ui(self):
@@ -380,9 +377,8 @@ class PointCloudTransformUI:
     def _on_load_dialog_done(self, filename):
         self.window.close_dialog()
 
-        pointclouds, pointcloud_names = self.load_pointclouds([filename])
+        pointclouds = self.load_pointclouds([filename])
         self.pointclouds.extend(pointclouds)
-        self.pointcloud_names.extend(pointcloud_names)
         for i in range(len(pointclouds)):
             self.add_pointcloud_to_scene(pointclouds[i], flip=self.settings.flip)
         # self.reset_camera_view()
@@ -390,8 +386,15 @@ class PointCloudTransformUI:
     def _on_menu_export(self):
         dlg = gui.FileDialog(gui.FileDialog.SAVE, "Choose file to save", self.window.theme)
         dlg.add_filter(".png", "PNG files (.png)")
-        pcl_names = "{}_" * len(self.pointcloud_names)
-        pcl_names = pcl_names.format(*[name.stem for name in self.pointcloud_names])
+        if len(self.pointclouds) > 3:
+            try:
+                pcl_names = f"{self.pointclouds[0].created_from.parent}_"
+            except Exception:
+                pcl_names = "{}_" * len(self.pointclouds)
+                pcl_names = pcl_names.format(*[pointcloud.name for pointcloud in self.pointclouds[:3]])
+        else:
+            pcl_names = "{}_" * len(self.pointclouds)
+            pcl_names = pcl_names.format(*[pointcloud.name for pointcloud in self.pointclouds])
         # set_path() defines a default filename for the dialog
         dlg.set_path(f"pcls_{pcl_names}{datetime.now().strftime('%Y%m%d_%H%M%S')}.png")
         dlg.set_on_cancel(self._on_file_dialog_cancel)
@@ -454,57 +457,45 @@ class PointCloudTransformUI:
         Updates the sliders to match the selected point cloud's pose.
         """
         selected_pcd = self.pointclouds[index]
-        self.sliders["rx"].double_value, self.sliders["ry"].double_value, self.sliders["rz"].double_value = (
-            Rotation.from_matrix(hom2rot(selected_pcd.pose)).as_euler("xyz", degrees=True)
-        )
-        self.sliders["tx"].double_value, self.sliders["ty"].double_value, self.sliders["tz"].double_value = hom2transl(
-            selected_pcd.pose
-        )
-        self.sliders["scale"].double_value = selected_pcd.scale
+        self.set_slider_to_pose(selected_pcd)
 
     def _on_transform_slider_changed(self, new_value):
+        """
+        Callback for when any of the transformation sliders change.
+        Updates the transformation of the currently selected point cloud.
+        """
         # Retrieve slider values.
         x_deg = self.sliders["rx"].double_value
         y_deg = self.sliders["ry"].double_value
         z_deg = self.sliders["rz"].double_value
-
         scale = self.sliders["scale"].double_value
         trans_x = self.sliders["tx"].double_value
         trans_y = self.sliders["ty"].double_value
         trans_z = self.sliders["tz"].double_value
 
-        self.R = roteuler2rotmat(x_deg, y_deg, z_deg, units="deg")
-
         # Create transformation matrix with scaling and translation
-        self.homogeneous_transform = rot_transl2hom(scale * self.R, [trans_x, trans_y, trans_z])
+        R = roteuler2rotmat(x_deg, y_deg, z_deg, units="deg")
+        homogeneous_transform = rot_transl2hom(scale * R, [trans_x, trans_y, trans_z])
 
         # Update point cloud transformation.
         active_pointcloud = self.pointclouds[self.dropdown.selected_index]
-        active_pointcloud.set_pose(self.homogeneous_transform)
-        self.scene.scene.set_geometry_transform(f"{active_pointcloud.id}", self.homogeneous_transform)
+        active_pointcloud.set_pose(homogeneous_transform)
+        self.scene.scene.set_geometry_transform(f"{active_pointcloud.id}", homogeneous_transform)
         self.scene.force_redraw()
 
     def _on_print_tf(self):
         with np.printoptions(suppress=True):
-            print("Transformation matrix:")
-            print(self.homogeneous_transform)
+            print("Transformation matrix (with scale):")
+            print(self.pointclouds[self.dropdown.selected_index].pose)
             print(f"Scale: {self.sliders['scale'].double_value}")
-            T = np.eye(4)
-            T[:3, :3] = self.R
-            T[:3, 3] = self.homogeneous_transform[:3, 3]
-            print("Transformation matrix without scale:")
-            print(T)
+            # T = np.eye(4)
+            # T[:3, :3] = R
+            # T[:3, 3] = homogeneous_transform[:3, 3]
+            # print("Transformation matrix without scale:")
+            # print(T)
 
     def _on_reset(self):
-        """Reset transformation sliders to their default values."""
-        self.sliders["rx"].double_value = self.settings.rotation_default
-        self.sliders["ry"].double_value = self.settings.rotation_default
-        self.sliders["rz"].double_value = self.settings.rotation_default
-        self.sliders["scale"].double_value = self.settings.scale_default
-        self.sliders["tx"].double_value = self.settings.translation_default
-        self.sliders["ty"].double_value = self.settings.translation_default
-        self.sliders["tz"].double_value = self.settings.translation_default
-        self._on_transform_slider_changed(0)
+        """Reset camera view."""
         self.scene.scene.camera.look_at(*self.settings.camera_view)
         self.scene.force_redraw()
 
@@ -597,46 +588,37 @@ class PointCloudTransformUI:
 
         return pcd
 
-    def load_pointclouds(self, filenames: list[str | Path]) -> Tuple[list[PosedPointCloud], list[Path]]:
+    def load_pointclouds(self, filenames: list[str | Path]) -> list[PosedPointCloud]:
         """
         Load point clouds from a list of PLY files.
         """
         pointclouds = []
-        pointcloud_names = []
         for file in filenames:
             file = Path(file)
             pointclouds.append(self.load_posed_pointcloud(file))
-            pointcloud_names.append(file)
 
-        return pointclouds, pointcloud_names
+        return pointclouds
 
-    def add_pcl_to_scene(
-        self,
-        pointcloud: o3d.geometry.PointCloud,
-        pointcloud_name: str,
-        pose: np.ndarray | None = None,
-        flip: bool = False,
-    ):
+    def load_poses(self, pose_file: str | Path) -> list[np.ndarray]:
         """
-        Add a point cloud to the scene in the given pose (or to the center of the scene if no pose is given).
-
-        Args:
-            pointcloud (o3d.geometry.PointCloud): The point cloud to add.
-            pointcloud_name (str): The name of the point cloud.
-            pose (np.ndarray, optional): The pose transformation to apply to the point cloud. Defaults to None.
-            flip (bool, optional): Whether to flip the point cloud upside down. Defaults to False.
+        Load poses from a file. The file should contain 4x4 transformation matrices in a text format.
         """
-        center = pointcloud.get_center()
-        pointcloud.translate(-center)
-        if pose is not None:
-            pointcloud.transform(pose)
-        if flip:
-            pointcloud.transform(rot2hom(Rotation.from_euler("xz", [-90, -90], degrees=True)))
-        self.scene.scene.add_geometry(f"{pointcloud_name}", pointcloud, self.mat)
+        pose_file = Path(pose_file)
+        if not pose_file.exists():
+            raise FileNotFoundError(f"Pose file '{pose_file}' does not exist.")
+
+        poses = []
+        with open(pose_file, "r") as f:
+            for line in f:
+                if line.strip():
+                    homogeneous_matrix = np.fromstring(line.strip(), sep=" ").reshape(4, 4)
+                    poses.append(homogeneous_matrix)
+
+        return poses
 
     def add_pointcloud_to_scene(self, pointcloud: PosedPointCloud, flip: bool = False):
         """
-        Add a point cloud to the scene in the given pose (or to the center of the scene if no pose is given).
+        Add a point cloud to the scene in its own pose.
 
         Args:
             pointcloud (PosedPointCloud): The point cloud to add.
@@ -646,6 +628,16 @@ class PointCloudTransformUI:
             pointcloud.pcd.transform(rot2hom(Rotation.from_euler("xz", [-90, -90], degrees=True)))
         self.scene.scene.add_geometry(f"{pointcloud.id}", pointcloud.pcd, self.mat)
         self.dropdown.add_item(pointcloud.name)
+
+    def set_slider_to_pose(self, pointcloud: PosedPointCloud):
+        """Set the sliders to the pose of the given PosedPointCloud."""
+        self.sliders["rx"].double_value, self.sliders["ry"].double_value, self.sliders["rz"].double_value = (
+            Rotation.from_matrix(hom2rot(pointcloud.pose)).as_euler("xyz", degrees=True)
+        )
+        self.sliders["tx"].double_value, self.sliders["ty"].double_value, self.sliders["tz"].double_value = hom2transl(
+            pointcloud.pose
+        )
+        self.sliders["scale"].double_value = pointcloud.scale
 
     def reset_camera_view(self):
         # Setup camera based on the combined bounding box of all point clouds.
@@ -692,47 +684,48 @@ class PointCloudTransformUI:
         self.infobar.frame = gui.Rect(r.x, r.get_bottom() - infobar_height, infobar_width, infobar_height)
 
 
-def main(pcl_files, initial_transform=None):
+def main(pcl_files, pose_file=None):
     gui.Application.instance.initialize()
     window = gui.Application.instance.create_window("Pointcloud alignment tool", 1920, 1080)
-    if initial_transform is not None:
-        PointCloudTransformUI(window, pcl_files, initial_transform)
-    else:
-        PointCloudTransformUI(window, pcl_files)
+    PointCloudTransformUI(window, pcl_files, pose_file)
     gui.Application.instance.run()
 
 
-if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(
-        prog="Pointcloud GUI",
-        description="GUI for visualizing and transforming point clouds using Open3D",
-    )
-    parser.add_argument(
-        "pointclouds",
-        type=str,
-        nargs="+",
-        help="Path of one or more point cloud files.",
-    )
-    parser.add_argument("-t", "--initial-transform", type=str, help="Initial transformation matrix")
-    args = parser.parse_args()
+def load_pointcloud_files(pointclouds):
     supported_filetypes = [".ply", ".bin"]
     pcl_files = []
-    for sysarg in sys.argv[1:]:
-        pcl_path = Path(sysarg)
+    for pcl_arg in pointclouds:
+        pcl_path = Path(pcl_arg)
         if not pcl_path.exists():
-            raise FileNotFoundError("Could not open file or folder '" + sysarg + "'")
+            raise click.FileError(pcl_arg, hint="Could not open file or folder")
         if pcl_path.is_dir():
             for extension in supported_filetypes:
                 pcl_files.extend(sorted(pcl_path.glob(f"*{extension}")))
             if len(pcl_files) == 0:
-                raise FileNotFoundError(f"No point clouds found in folder '{str(pcl_path)}'")
+                raise click.FileError(str(pcl_path), hint="No point clouds found in the folder")
             print(f"Found {len(pcl_files)} point clouds in {pcl_path}")
         else:
             if pcl_path.suffix not in supported_filetypes:
-                raise ValueError("Only {} files are supported".format(", ".join(supported_filetypes)))
-            pcl_files.append(Path(sysarg))
-    initial_transform = np.loadtxt(args.initial_transform) if args.initial_transform else None
+                raise click.BadParameter(f"Only {', '.join(supported_filetypes)} files are supported")
+            pcl_files.append(pcl_path)
+    return pcl_files
 
-    main(pcl_files, initial_transform)
+
+CONTEXT_SETTINGS = dict(help_option_names=["-h", "--help"])
+
+
+@click.command(context_settings=CONTEXT_SETTINGS)
+@click.argument("pointclouds", nargs=-1, required=True, type=click.Path(exists=True))
+@click.option(
+    "-p", "--pose-file", type=click.Path(exists=True), help="Path of file containing poses for the point clouds."
+)
+def cli(pointclouds, pose_file):
+    """
+    GUI for visualizing and transforming point clouds using Open3D.
+    """
+    pcl_files = load_pointcloud_files(pointclouds)
+    main(pcl_files, pose_file)
+
+
+if __name__ == "__main__":
+    cli()
