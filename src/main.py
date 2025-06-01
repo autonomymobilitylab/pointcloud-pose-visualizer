@@ -151,12 +151,14 @@ class PointCloudTransformUI:
                 self.scene.scene.set_geometry_transform(f"{self.pointclouds[i].id}", self.pointclouds[i].pose)
 
             self.set_slider_to_pose(self.pointclouds[self.dropdown.selected_index])
-
+        self.infobarlabel.text = "Active point cloud:\n{}".format(
+            self.pointclouds[self.dropdown.selected_index].created_from
+        )
         self.reset_camera_view()
 
     def setup_ui(self):
         em = self.window.theme.font_size
-        margin = 0.25 * em
+        margin = 0.5 * em
 
         # Create a SceneWidget for 3D rendering.
         self.scene = gui.SceneWidget()
@@ -176,6 +178,7 @@ class PointCloudTransformUI:
         # -------------- Slider panel --------------
         # Create the vertical slider panel.
         self.panel = gui.Vert(0.05 * em, gui.Margins(margin, margin, margin, 2 * margin))
+        self.panel.add_child(gui.Label("Point cloud settings:"))
 
         # Point cloud selector
         self.dropdown = gui.Combobox()
@@ -226,6 +229,9 @@ class PointCloudTransformUI:
         self.panel.add_child(slider)
         self.sliders["scale"] = slider
 
+        self.panel.add_fixed(0.5 * em)
+        self.panel.add_child(gui.Label("Global settings:"))
+
         # Point size slider
         self.panel.add_child(gui.Label(slider_labels["pointsize"]))
         slider = gui.Slider(gui.Slider.INT)
@@ -234,6 +240,8 @@ class PointCloudTransformUI:
         slider.set_on_value_changed(self._on_point_size_slider)
         self.panel.add_child(slider)
         self.sliders["pointsize"] = slider
+
+        self.panel.add_fixed(0.5 * em)
 
         # Print button
         print_button = gui.Button("Print TF")
@@ -249,6 +257,15 @@ class PointCloudTransformUI:
         button_bar.add_child(reset_button)
         button_bar.add_stretch()
         self.panel.add_child(button_bar)
+
+        self.panel.add_fixed(0.5 * em)
+
+        # Toggle coordinate axes
+        toggle_coords_button = gui.ToggleSwitch("Show Coordinate Axes")
+        toggle_coords_button.set_on_clicked(self._on_toggle_coordinate_axes)
+        self.panel.add_child(toggle_coords_button)
+
+        self.panel.add_fixed(0.5 * em)
 
         # Create a color picker panel
         self.background_color_picker = gui.ColorEdit()
@@ -316,10 +333,11 @@ class PointCloudTransformUI:
         # ---- Info bar ----
         self.infobar = gui.Horiz(0, gui.Margins(0.25 * em, 0.25 * em, 0.25 * em, 0))
         if len(self.pointclouds) > 0:
-            infobartext = "Point clouds:\n{}".format(*[pointcloud.name for pointcloud in self.pointclouds])
+            infobartext = "Active point cloud:\n{}".format(self.pointclouds[self.dropdown.selected_index].created_from)
         else:
             infobartext = "No point clouds loaded."
-        self.infobar.add_child(gui.Label(infobartext))
+        self.infobarlabel = gui.Label(infobartext)
+        self.infobar.add_child(self.infobarlabel)
         # ---- End Info bar ----
 
         # Layout the window
@@ -449,6 +467,11 @@ class PointCloudTransformUI:
         """
         selected_pcd = self.pointclouds[index]
         self.set_slider_to_pose(selected_pcd)
+        self.infobarlabel.text = "Active point cloud:\n{}".format(
+            self.pointclouds[self.dropdown.selected_index].created_from
+        )
+        # preferred_size = self.infobarlabel.calc_preferred_size(self.window.get_layout_context(), gui.Widget.Constraints())
+        # self.infobarlabel.frame = gui.Rect(10, 10, preferred_size.width, preferred_size.height)
 
     def _on_transform_slider_changed(self, new_value):
         """
@@ -472,6 +495,8 @@ class PointCloudTransformUI:
         active_pointcloud = self.pointclouds[self.dropdown.selected_index]
         active_pointcloud.set_pose(homogeneous_transform)
         self.scene.scene.set_geometry_transform(f"{active_pointcloud.id}", homogeneous_transform)
+        if self.scene.scene.has_geometry(f"{active_pointcloud.id}_coordinate_frame"):
+            self.scene.scene.set_geometry_transform(f"{active_pointcloud.id}_coordinate_frame", homogeneous_transform)
         self.scene.force_redraw()
 
     def _on_print_tf(self):
@@ -489,6 +514,18 @@ class PointCloudTransformUI:
         """Reset camera view."""
         self.scene.scene.camera.look_at(*self.settings.camera_view)
         self.scene.force_redraw()
+
+    def _on_toggle_coordinate_axes(self, is_on):
+        """
+        Toggle the visibility of coordinate axes in the scene.
+        """
+        for pointcloud in self.pointclouds:
+            if is_on:
+                if not self.scene.scene.has_geometry(f"{pointcloud.id}_coordinate_frame"):
+                    self.add_coordinate_frame_to_scene(pointcloud)
+            else:
+                if self.scene.scene.has_geometry(f"{pointcloud.id}_coordinate_frame"):
+                    self.scene.scene.remove_geometry(f"{pointcloud.id}_coordinate_frame")
 
     def _on_point_size_slider(self, size):
         self.mat.point_size = int(size)
@@ -619,6 +656,12 @@ class PointCloudTransformUI:
             pointcloud.pcd.transform(rot2hom(Rotation.from_euler("xz", [-90, -90], degrees=True)))
         self.scene.scene.add_geometry(f"{pointcloud.id}", pointcloud.pcd, self.mat)
         self.dropdown.add_item(pointcloud.name)
+
+    def add_coordinate_frame_to_scene(self, pointcloud: PosedPointCloud, size: float = 1.0):
+        """Add coordinate axes to the scene for a given point cloud."""
+        coord_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=size)
+        coord_frame.transform(pointcloud.pose)
+        self.scene.scene.add_geometry(f"{pointcloud.id}_coordinate_frame", coord_frame, self.mat)
 
     def set_slider_to_pose(self, pointcloud: PosedPointCloud):
         """Set the sliders to the pose of the given PosedPointCloud."""
