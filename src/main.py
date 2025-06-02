@@ -114,9 +114,11 @@ class PointCloudTransformUI:
     A simple GUI for visualizing and transforming point clouds using Open3D.
     """
 
-    MENU_OPEN = 1
-    MENU_EXPORT = 2
-    MENU_QUIT = 3
+    MENU_PCL_OPEN = 1
+    MENU_DIR_OPEN = 2
+    MENU_POSE_OPEN = 3
+    MENU_EXPORT = 4
+    MENU_QUIT = 5
     MENU_SHOW_SETTINGS = 11
     MENU_SHOW_INFOBAR = 12
     MENU_ABOUT = 21
@@ -124,7 +126,7 @@ class PointCloudTransformUI:
     def __init__(
         self,
         window,
-        ply_files: list[str | Path],
+        ply_files: list[str | Path] = [],
         pose_file: str | Path | None = None,
     ):
         self.settings = Settings()
@@ -142,18 +144,9 @@ class PointCloudTransformUI:
 
         if pose_file:
             poses = self.load_poses(pose_file)
-            if len(poses) != len(self.pointclouds):
-                raise ValueError(
-                    f"Number of poses ({len(poses)}) does not match number of point clouds ({len(self.pointclouds)})."
-                )
-            for i in range(len(poses)):
-                self.pointclouds[i].set_pose(poses[i])
-                self.scene.scene.set_geometry_transform(f"{self.pointclouds[i].id}", self.pointclouds[i].pose)
+            self.update_poses(self.pointclouds, poses)
 
-            self.set_slider_to_pose(self.pointclouds[self.dropdown.selected_index])
-        self.infobarlabel.text = "Active point cloud:\n{}".format(
-            self.pointclouds[self.dropdown.selected_index].created_from
-        )
+        self.refresh_infobar()
         self.reset_camera_view()
 
     def setup_ui(self):
@@ -230,6 +223,20 @@ class PointCloudTransformUI:
         self.sliders["scale"] = slider
 
         self.panel.add_fixed(0.5 * em)
+
+        # Toggle showing point cloud
+        self.toggle_show_pointcloud_button = gui.ToggleSwitch("Show point cloud")
+        self.toggle_show_pointcloud_button.is_on = True
+        self.toggle_show_pointcloud_button.set_on_clicked(self._on_toggle_show_pointcloud)
+        self.panel.add_child(self.toggle_show_pointcloud_button)
+
+        self.panel.add_fixed(0.5 * em)
+
+        remove_button = gui.Button("Remove pointcloud")
+        remove_button.set_on_clicked(self._on_remove_current_pointcloud)
+        self.panel.add_child(remove_button)
+
+        self.panel.add_fixed(0.5 * em)
         self.panel.add_child(gui.Label("Global settings:"))
 
         # Point size slider
@@ -247,7 +254,7 @@ class PointCloudTransformUI:
         print_button = gui.Button("Print TF")
         print_button.set_on_clicked(self._on_print_tf)
         # Reset button
-        reset_button = gui.Button("Reset TF")
+        reset_button = gui.Button("Reset view")
         reset_button.set_on_clicked(self._on_reset)
         # Add buttons side by side
         button_bar = gui.Horiz()
@@ -261,19 +268,19 @@ class PointCloudTransformUI:
         self.panel.add_fixed(0.5 * em)
 
         # Toggle coordinate axes
-        toggle_coords_button = gui.ToggleSwitch("Show Coordinate Axes")
-        toggle_coords_button.set_on_clicked(self._on_toggle_coordinate_axes)
-        self.panel.add_child(toggle_coords_button)
+        self.toggle_coords_button = gui.ToggleSwitch("Show Coordinate Axes")
+        self.toggle_coords_button.set_on_clicked(self._on_toggle_coordinate_axes)
+        self.panel.add_child(self.toggle_coords_button)
 
         self.panel.add_fixed(0.5 * em)
 
         # Create a color picker panel
-        self.background_color_picker = gui.ColorEdit()
-        self.background_color_picker.color_value = gui.Color(*self.settings.background_color)
-        self.background_color_picker.set_on_value_changed(self._on_background_color_changed)
+        background_color_picker = gui.ColorEdit()
+        background_color_picker.color_value = gui.Color(*self.settings.background_color)
+        background_color_picker.set_on_value_changed(self._on_background_color_changed)
 
         self.panel.add_child(gui.Label("Background color:"))
-        self.panel.add_child(self.background_color_picker)
+        self.panel.add_child(background_color_picker)
         # ------------ End Slider panel ------------
 
         # ---- Menu ----
@@ -286,7 +293,9 @@ class PointCloudTransformUI:
                 app_menu.add_separator()
                 app_menu.add_item("Quit", PointCloudTransformUI.MENU_QUIT)
             file_menu = gui.Menu()
-            file_menu.add_item("Open...", PointCloudTransformUI.MENU_OPEN)
+            file_menu.add_item("Open point cloud...", PointCloudTransformUI.MENU_PCL_OPEN)
+            file_menu.add_item("Open point cloud directory...", PointCloudTransformUI.MENU_DIR_OPEN)
+            file_menu.add_item("Load pose file...", PointCloudTransformUI.MENU_POSE_OPEN)
             file_menu.add_item("Export Current Image...", PointCloudTransformUI.MENU_EXPORT)
             if not isMacOS:
                 file_menu.add_separator()
@@ -319,7 +328,9 @@ class PointCloudTransformUI:
         # The menubar is global, but we need to connect the menu items to the
         # window, so that the window can call the appropriate function when the
         # menu item is activated.
-        self.window.set_on_menu_item_activated(PointCloudTransformUI.MENU_OPEN, self._on_menu_open)
+        self.window.set_on_menu_item_activated(PointCloudTransformUI.MENU_PCL_OPEN, self._on_menu_pcl_open)
+        self.window.set_on_menu_item_activated(PointCloudTransformUI.MENU_DIR_OPEN, self._on_menu_pcl_dir_open)
+        self.window.set_on_menu_item_activated(PointCloudTransformUI.MENU_POSE_OPEN, self._on_menu_pose_open)
         self.window.set_on_menu_item_activated(PointCloudTransformUI.MENU_EXPORT, self._on_menu_export)
         self.window.set_on_menu_item_activated(PointCloudTransformUI.MENU_QUIT, self._on_menu_quit)
         self.window.set_on_menu_item_activated(
@@ -332,11 +343,8 @@ class PointCloudTransformUI:
 
         # ---- Info bar ----
         self.infobar = gui.Horiz(0, gui.Margins(0.25 * em, 0.25 * em, 0.25 * em, 0))
-        if len(self.pointclouds) > 0:
-            infobartext = "Active point cloud:\n{}".format(self.pointclouds[self.dropdown.selected_index].created_from)
-        else:
-            infobartext = "No point clouds loaded."
-        self.infobarlabel = gui.Label(infobartext)
+        self.infobarlabel = gui.Label("")
+        self.refresh_infobar()
         self.infobar.add_child(self.infobarlabel)
         # ---- End Info bar ----
 
@@ -350,7 +358,7 @@ class PointCloudTransformUI:
         self.window.add_child(self.infobar)
 
     # ---- Menu Callbacks ----
-    def _on_menu_open(self):
+    def _on_menu_pcl_open(self):
         dlg = gui.FileDialog(gui.FileDialog.OPEN, "Choose file to load", self.window.theme)
         dlg.add_filter(".ply, .bin", "Supported files (.ply, .bin)")
         dlg.add_filter("", "All files")
@@ -377,20 +385,68 @@ class PointCloudTransformUI:
         # dlg.add_filter(".pts", "3D Points files (.pts)")
 
         dlg.set_on_cancel(self._on_file_dialog_cancel)
-        dlg.set_on_done(self._on_load_dialog_done)
+        dlg.set_on_done(self._on_single_pointcloud_load_dialog_done)
         self.window.show_dialog(dlg)
 
     def _on_file_dialog_cancel(self):
         self.window.close_dialog()
 
-    def _on_load_dialog_done(self, filename):
+    def _on_single_pointcloud_load_dialog_done(self, filename):
         self.window.close_dialog()
 
         pointclouds = self.load_pointclouds([filename])
         self.pointclouds.extend(pointclouds)
         for i in range(len(pointclouds)):
             self.add_pointcloud_to_scene(pointclouds[i], flip=self.settings.flip)
-        # self.reset_camera_view()
+        self.reset_camera_view()
+
+    def _on_menu_pcl_dir_open(self):
+        dlg = gui.FileDialog(gui.FileDialog.OPEN_DIR, "Choose directory to load", self.window.theme)
+        dlg.tooltip = "Select a directory containing point cloud files (.ply, .bin)"
+
+        dlg.set_on_cancel(self._on_file_dialog_cancel)
+        dlg.set_on_done(self._on_pointcloud_dir_load_dialog_done)
+        self.window.show_dialog(dlg)
+
+    def _on_pointcloud_dir_load_dialog_done(self, directory):
+        self.window.close_dialog()
+
+        # Load all point clouds from the directory
+        pcl_files = list(Path(directory).glob("*.ply")) + list(Path(directory).glob("*.bin"))
+        if not pcl_files:
+            gui.Application.instance.show_message_box(
+                "No point clouds found", "No .ply or .bin files found in the directory."
+            )
+            return
+
+        pointclouds = self.load_pointclouds(pcl_files)
+        self.pointclouds.extend(pointclouds)
+        for i in range(len(pointclouds)):
+            self.add_pointcloud_to_scene(pointclouds[i], flip=self.settings.flip)
+            if self.toggle_coords_button.is_on:
+                self.add_coordinate_frame_to_scene(pointclouds[i])
+        self.reset_camera_view()
+
+    def _on_menu_pose_open(self):
+        dlg = gui.FileDialog(gui.FileDialog.OPEN, "Choose pose file to load", self.window.theme)
+        dlg.add_filter(".txt", "Text files (.txt)")
+        dlg.tooltip = "Select a text file containing poses"
+
+        dlg.set_on_cancel(self._on_file_dialog_cancel)
+        dlg.set_on_done(self._on_pose_load_dialog_done)
+        self.window.show_dialog(dlg)
+
+    def _on_pose_load_dialog_done(self, filename):
+        self.window.close_dialog()
+        poses = self.load_poses(filename)
+        if len(self.pointclouds) != len(poses):
+            gui.Application.instance.show_message_box(
+                "Wrong amount of poses",
+                f"Number of poses ({len(poses)}) does not match number of point clouds ({len(self.pointclouds)}).",
+            )
+            return
+        self.update_poses(self.pointclouds, poses)
+        self.reset_camera_view()
 
     def _on_menu_export(self):
         dlg = gui.FileDialog(gui.FileDialog.SAVE, "Choose file to save", self.window.theme)
@@ -466,12 +522,12 @@ class PointCloudTransformUI:
         Updates the sliders to match the selected point cloud's pose.
         """
         selected_pcd = self.pointclouds[index]
-        self.set_slider_to_pose(selected_pcd)
-        self.infobarlabel.text = "Active point cloud:\n{}".format(
-            self.pointclouds[self.dropdown.selected_index].created_from
-        )
-        # preferred_size = self.infobarlabel.calc_preferred_size(self.window.get_layout_context(), gui.Widget.Constraints())
-        # self.infobarlabel.frame = gui.Rect(10, 10, preferred_size.width, preferred_size.height)
+        self.set_sliders_to_pose(selected_pcd)
+        self.refresh_infobar()
+        if self.scene.scene.geometry_is_visible(str(selected_pcd.id)):
+            self.toggle_show_pointcloud_button.is_on = True
+        else:
+            self.toggle_show_pointcloud_button.is_on = False
 
     def _on_transform_slider_changed(self, new_value):
         """
@@ -492,6 +548,8 @@ class PointCloudTransformUI:
         homogeneous_transform = rot_transl2hom(scale * R, [trans_x, trans_y, trans_z])
 
         # Update point cloud transformation.
+        if len(self.pointclouds) == 0:
+            return
         active_pointcloud = self.pointclouds[self.dropdown.selected_index]
         active_pointcloud.set_pose(homogeneous_transform)
         self.scene.scene.set_geometry_transform(f"{active_pointcloud.id}", homogeneous_transform)
@@ -499,7 +557,65 @@ class PointCloudTransformUI:
             self.scene.scene.set_geometry_transform(f"{active_pointcloud.id}_coordinate_frame", homogeneous_transform)
         self.scene.force_redraw()
 
+    def _on_toggle_show_pointcloud(self, is_on):
+        """Toggle the visibility of the currently active point cloud in the scene."""
+        if len(self.pointclouds) == 0:
+            return
+        active_pointcloud = self.pointclouds[self.dropdown.selected_index]
+        active_pointcloud_coordframe = f"{active_pointcloud.id}_coordinate_frame"
+        if is_on:
+            self.scene.scene.show_geometry(str(active_pointcloud.id), show=True)
+            if self.toggle_coords_button.is_on:
+                if self.scene.scene.has_geometry(active_pointcloud_coordframe):
+                    self.scene.scene.show_geometry(active_pointcloud_coordframe, show=True)
+                else:
+                    self.add_coordinate_frame_to_scene(active_pointcloud)
+        else:
+            self.scene.scene.show_geometry(str(active_pointcloud.id), show=False)
+            if self.scene.scene.has_geometry(active_pointcloud_coordframe):
+                self.scene.scene.show_geometry(active_pointcloud_coordframe, show=False)
+        self.scene.force_redraw()
+
+    def _on_remove_current_pointcloud(self):
+        """Remove the currently selected point cloud from the scene."""
+        if len(self.pointclouds) == 0:
+            return
+        selected_index = self.dropdown.selected_index
+        active_pointcloud = self.pointclouds[selected_index]
+        self.scene.scene.remove_geometry(str(active_pointcloud.id))
+        if self.scene.scene.has_geometry(f"{active_pointcloud.id}_coordinate_frame"):
+            self.scene.scene.remove_geometry(f"{active_pointcloud.id}_coordinate_frame")
+        self.dropdown.remove_item(selected_index)
+        del self.pointclouds[selected_index]
+        if len(self.pointclouds) > 0:
+            self.dropdown.selected_index = min(selected_index, len(self.pointclouds) - 1)
+            self.set_sliders_to_pose(self.pointclouds[self.dropdown.selected_index])
+            if self.scene.scene.geometry_is_visible(str(self.pointclouds[self.dropdown.selected_index].id)):
+                self.toggle_show_pointcloud_button.is_on = True
+            else:
+                self.toggle_show_pointcloud_button.is_on = False
+        self.refresh_infobar()
+
+    def _on_toggle_coordinate_axes(self, is_on):
+        """Toggle the visibility of coordinate axes in the scene."""
+        for pointcloud in self.pointclouds:
+            if self.scene.scene.geometry_is_visible(str(pointcloud.id)):
+                if is_on:
+                    if not self.scene.scene.has_geometry(f"{pointcloud.id}_coordinate_frame"):
+                        self.add_coordinate_frame_to_scene(pointcloud)
+                else:
+                    if self.scene.scene.has_geometry(f"{pointcloud.id}_coordinate_frame"):
+                        self.scene.scene.remove_geometry(f"{pointcloud.id}_coordinate_frame")
+
+    def _on_point_size_slider(self, size):
+        self.mat.point_size = int(size)
+        self.scene.scene.update_material(self.mat)
+
     def _on_print_tf(self):
+        """Print the transformation matrix and scale of the currently selected point cloud."""
+        if len(self.pointclouds) == 0:
+            print("No point clouds loaded.")
+            return
         with np.printoptions(suppress=True):
             print("Transformation matrix (with scale):")
             print(self.pointclouds[self.dropdown.selected_index].pose)
@@ -514,22 +630,6 @@ class PointCloudTransformUI:
         """Reset camera view."""
         self.scene.scene.camera.look_at(*self.settings.camera_view)
         self.scene.force_redraw()
-
-    def _on_toggle_coordinate_axes(self, is_on):
-        """
-        Toggle the visibility of coordinate axes in the scene.
-        """
-        for pointcloud in self.pointclouds:
-            if is_on:
-                if not self.scene.scene.has_geometry(f"{pointcloud.id}_coordinate_frame"):
-                    self.add_coordinate_frame_to_scene(pointcloud)
-            else:
-                if self.scene.scene.has_geometry(f"{pointcloud.id}_coordinate_frame"):
-                    self.scene.scene.remove_geometry(f"{pointcloud.id}_coordinate_frame")
-
-    def _on_point_size_slider(self, size):
-        self.mat.point_size = int(size)
-        self.scene.scene.update_material(self.mat)
 
     def _on_background_color_changed(self, new_color):
         # Update material color
@@ -547,7 +647,8 @@ class PointCloudTransformUI:
 
         self.scene.scene.scene.render_to_image(on_image)
 
-    def srgb_to_linear(self, colors: np.ndarray) -> np.ndarray:
+    @staticmethod
+    def srgb_to_linear(colors: np.ndarray) -> np.ndarray:
         """
         Convert sRGB colors to linear RGB.
         """
@@ -557,7 +658,8 @@ class PointCloudTransformUI:
         linear = np.where(colors <= 0.04045, colors / 12.92, ((colors + 0.055) / 1.055) ** 2.4)
         return linear
 
-    def intensity_to_color(self, intensities: np.ndarray, colormap: str) -> np.ndarray:
+    @staticmethod
+    def intensity_to_color(intensities: np.ndarray, colormap: str) -> np.ndarray:
         """
         Normalizes intensities and maps them to colors using a colormap.
         """
@@ -627,7 +729,8 @@ class PointCloudTransformUI:
 
         return pointclouds
 
-    def load_poses(self, pose_file: str | Path) -> list[np.ndarray]:
+    @staticmethod
+    def load_poses(pose_file: str | Path) -> list[np.ndarray]:
         """
         Load poses from a file. The file should contain 4x4 transformation matrices in a text format.
         """
@@ -643,6 +746,21 @@ class PointCloudTransformUI:
                     poses.append(homogeneous_matrix)
 
         return poses
+
+    def update_poses(self, pointclouds: list[PosedPointCloud], poses: list[np.ndarray]):
+        """
+        Update the poses of the point clouds with a list of new poses.
+        The number of poses must match the number of point clouds.
+        """
+        if len(pointclouds) != len(poses):
+            raise ValueError(
+                f"Number of poses ({len(poses)}) does not match number of point clouds ({len(pointclouds)})."
+            )
+        for i, pointcloud in enumerate(pointclouds):
+            pointcloud.set_pose(poses[i])
+            self.scene.scene.set_geometry_transform(f"{pointcloud.id}", pointcloud.pose)
+
+        self.set_sliders_to_pose(self.pointclouds[self.dropdown.selected_index])
 
     def add_pointcloud_to_scene(self, pointcloud: PosedPointCloud, flip: bool = False):
         """
@@ -663,7 +781,7 @@ class PointCloudTransformUI:
         coord_frame.transform(pointcloud.pose)
         self.scene.scene.add_geometry(f"{pointcloud.id}_coordinate_frame", coord_frame, self.mat)
 
-    def set_slider_to_pose(self, pointcloud: PosedPointCloud):
+    def set_sliders_to_pose(self, pointcloud: PosedPointCloud):
         """Set the sliders to the pose of the given PosedPointCloud."""
         self.sliders["rx"].double_value, self.sliders["ry"].double_value, self.sliders["rz"].double_value = (
             Rotation.from_matrix(hom2rot(pointcloud.pose)).as_euler("xyz", degrees=True)
@@ -675,6 +793,9 @@ class PointCloudTransformUI:
 
     def reset_camera_view(self):
         # Setup camera based on the combined bounding box of all point clouds.
+        if len(self.pointclouds) == 0:
+            print("No point clouds loaded. Cannot reset camera view.")
+            return
         max_bound = np.max(np.array([pointcloud.pcd.get_max_bound() for pointcloud in self.pointclouds]), axis=0)
         min_bound = np.min(np.array([pointcloud.pcd.get_min_bound() for pointcloud in self.pointclouds]), axis=0)
         combined_bbox = o3d.geometry.AxisAlignedBoundingBox(min_bound, max_bound)
@@ -688,6 +809,17 @@ class PointCloudTransformUI:
             [0, 0, 1],  # Up direction
         ]
         self.scene.scene.camera.look_at(*self.settings.camera_view)
+
+    def refresh_infobar(self):
+        """Update the info bar with the currently active point cloud."""
+        if len(self.pointclouds) > 0:
+            self.infobarlabel.text = "Active point cloud:\n{}".format(
+                self.pointclouds[self.dropdown.selected_index].created_from
+            )
+        else:
+            self.infobarlabel.text = "No point clouds loaded."
+        # preferred_size = self.infobarlabel.calc_preferred_size(self.window.get_layout_context(), gui.Widget.Constraints())
+        # self.infobarlabel.frame = gui.Rect(10, 10, preferred_size.width, preferred_size.height)
 
     def on_layout(self, layout_context):
         # The on_layout callback should set the frame (position + size) of every
@@ -718,13 +850,6 @@ class PointCloudTransformUI:
         self.infobar.frame = gui.Rect(r.x, r.get_bottom() - infobar_height, infobar_width, infobar_height)
 
 
-def main(pcl_files, pose_file=None):
-    gui.Application.instance.initialize()
-    window = gui.Application.instance.create_window("Pointcloud alignment tool", 1920, 1080)
-    PointCloudTransformUI(window, pcl_files, pose_file)
-    gui.Application.instance.run()
-
-
 def load_pointcloud_files(pointclouds):
     supported_filetypes = [".ply", ".bin"]
     pcl_files = []
@@ -745,11 +870,18 @@ def load_pointcloud_files(pointclouds):
     return pcl_files
 
 
+def main(pcl_files=[], pose_file=None):
+    gui.Application.instance.initialize()
+    window = gui.Application.instance.create_window("Pointcloud alignment tool", 1920, 1080)
+    PointCloudTransformUI(window, pcl_files, pose_file)
+    gui.Application.instance.run()
+
+
 CONTEXT_SETTINGS = dict(help_option_names=["-h", "--help"])
 
 
 @click.command(context_settings=CONTEXT_SETTINGS)
-@click.argument("pointclouds", nargs=-1, required=True, type=click.Path(exists=True))
+@click.argument("pointclouds", nargs=-1, required=False, type=click.Path(exists=True))
 @click.option(
     "-p", "--pose-file", type=click.Path(exists=True), help="Path of file containing poses for the point clouds."
 )
