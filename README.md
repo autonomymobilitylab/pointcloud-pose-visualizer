@@ -15,9 +15,13 @@ pip install .
 
 Conda also works just as well as virtualenv.
 
-Additional instructions in: `pviz --help`.
+Additional instructions for the CLI are found in: `pviz --help`.
 
 If you experience segfault errors when opening the GUI, try adding an environment variable: `export XDG_SESSION_TYPE=x11`.
+
+### Library usage
+
+Follow the `cli()` function for an example on how to use the library in your own code.
 
 ## Dev setup
 
