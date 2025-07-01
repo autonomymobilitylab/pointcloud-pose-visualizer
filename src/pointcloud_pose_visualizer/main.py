@@ -1,5 +1,6 @@
 import click
-from pathlib import Path
+from os import PathLike
+from typing import Optional
 
 from pointcloud_pose_visualizer.posed_pointcloud import load_pointcloud_files, load_pointclouds, load_poses
 from pointcloud_pose_visualizer.ui import start_gui
@@ -12,7 +13,7 @@ CONTEXT_SETTINGS = dict(help_option_names=["-h", "--help"])
 @click.option(
     "-p", "--pose-file", type=click.Path(exists=True), help="Path of file containing poses for the point clouds."
 )
-def cli(pointclouds: list[str | Path], pose_file: str | Path):
+def cli(pointclouds: Optional[list[str | PathLike]], pose_file: Optional[str | PathLike]):
     """
     GUI for visualizing and transforming point clouds using Open3D.
     """

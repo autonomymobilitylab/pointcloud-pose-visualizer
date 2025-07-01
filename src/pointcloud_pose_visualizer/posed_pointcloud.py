@@ -1,6 +1,7 @@
 from datetime import datetime
+from os import PathLike
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Optional
 
 import click
 import matplotlib.pyplot as plt
@@ -21,9 +22,9 @@ class PosedPointCloud:
     def __init__(
         self,
         pcd: o3d.geometry.PointCloud,
-        created_from: str | Path = "",
-        pose: np.ndarray[tuple[Literal[4, 4]], np.dtype[np.float64]] | None = np.eye(4),
-        scale: float | None = 1.0,
+        created_from: Optional[str | PathLike] = "",
+        pose: Optional[np.ndarray[tuple[Literal[4, 4]], np.dtype[np.float64]]] = np.eye(4),
+        scale: Optional[float] = 1.0,
     ):
         """
         A point cloud with an optional pose.
@@ -98,7 +99,7 @@ def intensity_to_color(intensities: np.ndarray, colormap: str) -> np.ndarray:
     return colors
 
 
-def load_posed_pointcloud(filename: str | Path, pose=None, scale=None) -> PosedPointCloud:
+def load_posed_pointcloud(filename: str | PathLike, pose=None, scale: Optional[float] = None) -> PosedPointCloud:
     """
     Load point cloud from a file. The file can be in PLY or BIN format.
     """
@@ -113,7 +114,7 @@ def load_posed_pointcloud(filename: str | Path, pose=None, scale=None) -> PosedP
     return PosedPointCloud(pcd=pcd, created_from=filename, pose=pose, scale=scale)
 
 
-def load_pcd_from_bin(filename: str | Path, colormap: str = "rainbow") -> o3d.geometry.PointCloud:
+def load_pcd_from_bin(filename: str | PathLike, colormap: str = "rainbow") -> o3d.geometry.PointCloud:
     """
     Load point cloud from binary file. The binary file should contain 4 floats per point: x, y, z, intensity
     """
@@ -130,7 +131,7 @@ def load_pcd_from_bin(filename: str | Path, colormap: str = "rainbow") -> o3d.ge
     return pcd
 
 
-def load_pcd_from_ply(filename: str | Path, convert_srgb: bool = True) -> o3d.geometry.PointCloud:
+def load_pcd_from_ply(filename: str | PathLike, convert_srgb: Optional[bool] = True) -> o3d.geometry.PointCloud:
     """
     Load point cloud from a PLY file. Standardizes the point cloud by converting colors to linear
     """
@@ -146,7 +147,7 @@ def load_pcd_from_ply(filename: str | Path, convert_srgb: bool = True) -> o3d.ge
     return pcd
 
 
-def load_pointclouds(filenames: list[str | Path]) -> list[PosedPointCloud]:
+def load_pointclouds(filenames: list[str | PathLike]) -> list[PosedPointCloud]:
     """
     Load point clouds from a list of PLY files.
     """
@@ -158,7 +159,7 @@ def load_pointclouds(filenames: list[str | Path]) -> list[PosedPointCloud]:
     return pointclouds
 
 
-def load_poses(pose_file: str | Path) -> list[np.ndarray]:
+def load_poses(pose_file: str | PathLike) -> list[np.ndarray]:
     """
     Load poses from a file. The file should contain 4x4 transformation matrices in a text format.
     """

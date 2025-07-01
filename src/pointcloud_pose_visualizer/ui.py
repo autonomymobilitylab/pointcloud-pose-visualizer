@@ -1,5 +1,5 @@
 import platform
-from typing import Literal
+from typing import Literal, Optional
 
 import numpy as np
 import open3d as o3d
@@ -68,8 +68,8 @@ class PointCloudTransformUI:
     def __init__(
         self,
         window,
-        pointclouds: list[PosedPointCloud] = [],
-        poses: list[np.ndarray[tuple[Literal[4, 4]], np.dtype[np.float64]]] = [],
+        pointclouds: Optional[list[PosedPointCloud]] = [],
+        poses: Optional[list[np.ndarray[tuple[Literal[4, 4]], np.dtype[np.float64]]]] = [],
     ):
         self.settings = Settings()
         self.state = AppState()
@@ -326,7 +326,7 @@ class PointCloudTransformUI:
 
         self.set_sliders_to_pose(self.state.pointclouds[self.dropdown.selected_index])
 
-    def add_pointcloud_to_scene(self, pointcloud: PosedPointCloud, flip: bool = False):
+    def add_pointcloud_to_scene(self, pointcloud: PosedPointCloud, flip: Optional[bool] = False):
         """
         Add a point cloud to the scene in its own pose.
 
@@ -339,7 +339,7 @@ class PointCloudTransformUI:
         self.scene.scene.add_geometry(f"{pointcloud.id}", pointcloud.pcd, self.mat)
         self.dropdown.add_item(pointcloud.name)
 
-    def add_coordinate_frame_to_scene(self, pointcloud: PosedPointCloud, size: float = 1.0):
+    def add_coordinate_frame_to_scene(self, pointcloud: PosedPointCloud, size: Optional[float] = 1.0):
         """Add coordinate axes to the scene for a given point cloud."""
         coord_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=size)
         coord_frame.transform(pointcloud.pose)
@@ -415,7 +415,8 @@ class PointCloudTransformUI:
 
 
 def start_gui(
-    pointclouds: list[PosedPointCloud] = [], poses: list[np.ndarray[tuple[Literal[4, 4]], np.dtype[np.float64]]] = []
+    pointclouds: Optional[list[PosedPointCloud]] = [],
+    poses: Optional[list[np.ndarray[tuple[Literal[4, 4]], np.dtype[np.float64]]]] = [],
 ):
     gui.Application.instance.initialize()
     window = gui.Application.instance.create_window("Pointcloud alignment tool", 1080, 720)
